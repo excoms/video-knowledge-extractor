@@ -28,8 +28,8 @@ all = ["faster-whisper>=1.0", "anthropic>=0.40", "openai>=1.40"]
 vke = "vke.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/excoms-ai/video-knowledge-extractor"
-Issues = "https://github.com/excoms-ai/video-knowledge-extractor/issues"
+Homepage = "https://github.com/excoms/video-knowledge-extractor"
+Issues = "https://github.com/excoms/video-knowledge-extractor/issues"
 
 [build-system]
 requires = ["hatchling"]

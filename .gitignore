@@ -19,3 +19,10 @@ __pycache__/
 .DS_Store
 vke-out/
 test-out/
+
+# private: critique of a named individual's work — not for publication
+analysis/
+# private: internal design + distribution strategy
+docs/superpowers/
+# superseded by src/vke
+files/
