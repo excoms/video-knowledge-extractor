@@ -1,0 +1,19 @@
+# throwaway spike artefacts
+probe_*/
+corpus_*/
+files.zip
+
+# environments & caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# media / intermediate
+*.wav
+*.vtt
+*.m4a
+
+# os
+.DS_Store
