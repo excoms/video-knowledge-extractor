@@ -173,6 +173,29 @@ you're engaging with. Not to build profiles of private individuals.
 - Speaker attribution (word-level timestamps make this feasible)
 - Watching the video, not just hearing it — on-screen text, charts, slides
 
+## Notices
+
+**Not affiliated with YouTube or Google.** This project is independent and is not
+endorsed by, sponsored by, or connected to them in any way.
+
+**You are responsible for how you use it.** Accessing YouTube programmatically may
+conflict with YouTube's Terms of Service, and copyright in videos and their
+transcripts belongs to their owners. This tool downloads nothing to any server we
+run and redistributes no content — everything happens on your machine, and what
+you do with the output is your responsibility, under the laws that apply to you.
+
+**Analysis output is a language model's assessment, not verified fact.** It may be
+wrong, and it may be confidently wrong. Check anything before relying on it, and
+check it twice before publishing it.
+
+**Please use it on public content**, to understand arguments — your own, or ones
+you are engaging with. Not to build profiles of private individuals, and not to
+harass anyone.
+
+**No warranty.** As set out in the Apache-2.0 licence, this software is provided
+"as is", without warranties or conditions of any kind, and the contributors are
+not liable for any damages arising from its use.
+
 ## Licence
 
 Apache-2.0. Built by [excoms.ai](https://excoms.ai).
