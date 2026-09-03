@@ -31,11 +31,17 @@ class ClaudeCliProvider:
             detail = (r.stderr or r.stdout or "").strip()[:300] or "no error output"
             raise ProviderError(
                 f"claude CLI exited {r.returncode}: {detail}\n"
-                f"If you are running vke from inside a Claude Code session, the "
-                f"nested call can hang or fail — run it from a normal terminal, "
-                f"or use --provider anthropic/openai/ollama."
+                f"If that mentions authentication, run `claude` once "
+                f"interactively to sign in again. Otherwise try "
+                f"--provider anthropic, openai or ollama."
             )
         out = r.stdout.strip()
         if not out:
             raise ProviderError("claude CLI returned nothing. Try --provider anthropic.")
+        if "Failed to authenticate" in out or "authentication_error" in out:
+            raise ProviderError(
+                "The claude CLI is signed out — its token has expired. "
+                "Run `claude` once interactively to sign in again, or use "
+                "--provider anthropic, openai or ollama."
+            )
         return out
