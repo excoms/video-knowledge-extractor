@@ -1,0 +1,233 @@
+"""A small local web interface: `vke ui`.
+
+A thin layer over the same core the CLI uses — never a second implementation,
+or the limits chokepoint stops being one. Standard library only, because a
+public tool that needs a web framework to show a form has already lost people
+at the install step.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import webbrowser
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+STATIC = Path(__file__).resolve().parent / "static"
+
+# One run at a time. This is a personal tool on someone's laptop, not a service.
+JOB: dict = {
+    "state": "idle",          # idle | listing | transcribing | analysing | done | error
+    "message": "",
+    "videos": [],             # [{id, title, state, chars, rate, note}]
+    "records": [],
+    "outdir": "",
+    "started": None,
+    "error": "",
+}
+LOCK = threading.Lock()
+
+
+def _set(**fields) -> None:
+    with LOCK:
+        JOB.update(fields)
+
+
+def _video(vid: str, **fields) -> None:
+    with LOCK:
+        for v in JOB["videos"]:
+            if v["id"] == vid:
+                v.update(fields)
+                return
+        JOB["videos"].append({"id": vid, **fields})
+
+
+def run_job(cfg: dict) -> None:
+    """Execute a run, reporting progress into JOB as it goes."""
+    from . import corpus as corpus_mod
+    from . import report
+    from .analysis import analyse, plan_schema
+    from .cli import _load_profile
+    from .limits import Aborted, Limits
+    from .providers import autodetect, get_provider
+    from .sources import resolve_many
+    from .store import Store
+    from .transcripts import Transcript, fetch_captions, transcribe
+
+    try:
+        urls = [u.strip() for u in cfg.get("urls", "").splitlines() if u.strip()]
+        if not urls:
+            raise ValueError("Add at least one link.")
+        ask = (cfg.get("ask") or "").strip()
+        if not ask and not cfg.get("transcribe_only"):
+            raise ValueError("Say what you want from the videos.")
+
+        limits = Limits(assume_yes=True)
+        outdir = Path(cfg.get("outdir") or "vke-out")
+        store = Store(outdir)
+        tmp = outdir / ".tmp"
+        for stale in tmp.glob("*.wav"):
+            stale.unlink(missing_ok=True)
+
+        _set(state="listing", message="Finding videos…", outdir=str(outdir.resolve()),
+             started=datetime.now().isoformat(), videos=[], records=[], error="")
+        refs = resolve_many(urls, limits)
+        if not refs:
+            raise ValueError("No videos found. Check the link.")
+        if cfg.get("limit"):
+            refs = refs[: int(cfg["limit"])]
+
+        for r in refs:
+            _video(r.video_id, title=r.title, state="waiting", chars=0, rate=0, note="")
+
+        caption_langs = [s.strip() for s in (cfg.get("captions") or "").split(",") if s.strip()]
+
+        _set(state="transcribing", message=f"{len(refs)} videos")
+        for ref in refs:
+            if store.done(ref.video_id):
+                st = store.state[ref.video_id]
+                _video(ref.video_id, state="done", chars=st.get("chars", 0),
+                       rate=round(st.get("chars", 0) / (st.get("duration") or 1), 1),
+                       note="already saved")
+                continue
+            _video(ref.video_id, state="running", note="transcribing")
+            try:
+                limits.check_resources("this video")
+                t = None
+                if caption_langs:
+                    t = fetch_captions(ref, caption_langs, tmp, limits)
+                if t is None:
+                    t = transcribe(ref, backend=cfg.get("asr", "faster-whisper"),
+                                   language=cfg.get("lang") or None,
+                                   tmp_dir=tmp, limits=limits)
+                store.put_transcript(ref.video_id, t.header(), t.text)
+                store.mark(ref.video_id, status="ok", title=t.title, duration=t.duration,
+                           chars=len(t.text), source=t.source, language=t.language)
+                _video(ref.video_id, state="done", title=t.title, chars=len(t.text),
+                       rate=round(t.char_rate, 1), note=t.source.split(":")[0])
+            except Aborted as e:
+                _video(ref.video_id, state="failed", note=str(e)[:120])
+                raise
+            except Exception as e:
+                msg = str(e)
+                deferred = "Premieres in" in msg or "will begin in" in msg
+                store.mark(ref.video_id,
+                           status="deferred" if deferred else f"error: {msg[:160]}",
+                           title=ref.title)
+                _video(ref.video_id, state="deferred" if deferred else "failed",
+                       note="not released yet" if deferred else msg[:110])
+            limits.nap()
+
+        ready = [r for r in refs if store.done(r.video_id)]
+        if cfg.get("transcribe_only") or not ready:
+            _set(state="done", message=f"{len(ready)} transcribed")
+            return
+
+        name = cfg.get("provider") or "auto"
+        provider = get_provider(autodetect() if name == "auto" else name,
+                                cfg.get("model") or None)
+        _set(state="analysing", message=f"Working out what to extract…")
+
+        plan = plan_schema(provider, ask, cfg.get("shape", ""))
+        _set(message=f"Extracting {plan.record_name}s "
+                     f"({', '.join(f['name'] for f in plan.fields)})")
+
+        profile_text = _load_profile(cfg.get("profile") or "general")
+        records: list[dict] = []
+        for i, ref in enumerate(ready, 1):
+            text = store.get_transcript(ref.video_id)
+            if not text:
+                continue
+            st = store.state[ref.video_id]
+            t = Transcript(ref.video_id, st.get("title", ref.title), ref.url, text,
+                           st.get("language", ""), st.get("source", ""),
+                           st.get("duration", 0))
+            _video(ref.video_id, state="analysing", note="reading")
+            got = analyse(provider, t, plan, ask,
+                          cfg.get("output_language") or "English", profile_text,
+                          cfg.get("instructions", ""))
+            records.extend(got)
+            _video(ref.video_id, state="done",
+                   note=f"{len(got)} {plan.record_name}(s)")
+            _set(records=records, message=f"{len(records)} found across {i} video(s)")
+
+        meta = {"title": f"{plan.record_name.title()} analysis", "request": ask,
+                "source": ", ".join(urls), "video_count": len(ready),
+                "record_count": len(records), "provider": provider.name}
+        report.write_json(records, outdir / "analysis.json", meta)
+        report.write_markdown(records, outdir / "analysis.md", meta)
+        if len({r["video_id"] for r in records}) > 1:
+            _set(message="Looking for patterns across all videos…")
+            reg = corpus_mod.build_register(provider, records, ask,
+                                            cfg.get("output_language") or "English")
+            corpus_mod.write_register(reg, outdir / "patterns.md", meta)
+
+        _set(state="done", message=f"{len(records)} records from {len(ready)} videos")
+
+    except Exception as e:
+        _set(state="error", error=str(e)[:400], message="Stopped")
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):        # keep the terminal readable
+        pass
+
+    def _send(self, code: int, body: bytes, ctype: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, obj, code: int = 200) -> None:
+        self._send(code, json.dumps(obj, ensure_ascii=False).encode(),
+                   "application/json; charset=utf-8")
+
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            page = (STATIC / "index.html").read_bytes()
+            return self._send(200, page, "text/html; charset=utf-8")
+        if self.path == "/api/status":
+            with LOCK:
+                return self._json(dict(JOB))
+        if self.path == "/api/providers":
+            from .providers import REGISTRY, get_provider
+            out = {}
+            for n in REGISTRY:
+                try:
+                    get_provider(n)
+                    out[n] = "ready"
+                except Exception as e:
+                    out[n] = str(e).splitlines()[0][:90]
+            return self._json(out)
+        self._send(404, b"not found", "text/plain")
+
+    def do_POST(self):
+        if self.path != "/api/run":
+            return self._send(404, b"not found", "text/plain")
+        with LOCK:
+            if JOB["state"] in ("listing", "transcribing", "analysing"):
+                return self._json({"error": "A run is already in progress."}, 409)
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            cfg = json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError:
+            return self._json({"error": "Bad request."}, 400)
+        threading.Thread(target=run_job, args=(cfg,), daemon=True).start()
+        self._json({"ok": True})
+
+
+def serve(host: str = "127.0.0.1", port: int = 7864, open_browser: bool = True) -> None:
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    url = f"http://{host}:{port}"
+    print(f"\n  Video Knowledge Extractor")
+    print(f"  {url}")
+    print(f"  Ctrl-C to stop\n")
+    if open_browser:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n  Stopped.\n")
+        httpd.shutdown()

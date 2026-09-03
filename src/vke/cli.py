@@ -46,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
   vke run <url> --ask "Build a timeline of the events described"
   vke run <url> --ask "..." --output-language English --provider ollama
   vke run <url> --transcribe-only          # just the transcripts
+  vke ui                                   # open the web interface
   vke providers                            # what can this machine use?
 """)
     p.add_argument("--version", action="version", version=f"vke {__version__}")
@@ -72,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-corpus", action="store_true", help="skip the cross-video pass")
     r.add_argument("--yes", action="store_true", help="don't ask before large runs")
 
+    u = sub.add_parser("ui", help="open the local web interface")
+    u.add_argument("--port", type=int, default=7864)
+    u.add_argument("--host", default="127.0.0.1")
+    u.add_argument("--no-browser", action="store_true")
+
     sub.add_parser("providers", help="show which analysis backends are usable here")
     return p
 
@@ -83,6 +89,12 @@ def _load_profile(name: str) -> str:
         if f.exists():
             return f.read_text("utf-8")
     return ""
+
+
+def cmd_ui(a) -> int:
+    from .ui import serve
+    serve(host=a.host, port=a.port, open_browser=not a.no_browser)
+    return 0
 
 
 def cmd_providers() -> int:
@@ -228,6 +240,8 @@ def main(argv=None) -> int:
     try:
         if args.command == "providers":
             return cmd_providers()
+        if args.command == "ui":
+            return cmd_ui(args)
         return cmd_run(args)
     except Aborted as e:
         print(f"\n  Stopped. {e}\n", file=sys.stderr)

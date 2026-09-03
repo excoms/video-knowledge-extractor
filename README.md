@@ -71,6 +71,29 @@ argument fields. There's no vocabulary to learn.
 
 `--preset` just pre-fills `--ask` with wording that works. Edit it, or ignore it.
 
+## The interface
+
+Prefer not to use a terminal? There's a local web interface:
+
+```bash
+vke ui
+```
+
+That opens `http://localhost:7864` in your browser. Three fields — paste links,
+say what you want, say how the output should look — and everything else tucked
+behind **Advanced** with working defaults.
+
+![The vke interface](docs/images/ui.png)
+
+It runs entirely on your machine. Nothing is uploaded, and the page is served by
+the same core the CLI uses, so limits, pacing and checkpointing behave
+identically either way.
+
+Because transcription takes minutes rather than seconds, the interface shows live
+per-video progress — what's transcribing now, what's finished, what's waiting on
+an unreleased premiere — and results appear as they're extracted rather than all
+at the end.
+
 ## What you get
 
 ```
@@ -146,7 +169,6 @@ you're engaging with. Not to build profiles of private individuals.
 
 **v0.1 — early.** The pipeline works end to end. Not there yet:
 
-- Web UI (`vke ui`)
 - MCP server, so it works directly inside Claude, Cursor and similar
 - Speaker attribution (word-level timestamps make this feasible)
 - Watching the video, not just hearing it — on-screen text, charts, slides

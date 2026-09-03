@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Knowledge Extractor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Nastaliq+Urdu&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{
+  --paper:#F3F5F4;--surface:#FFF;--sunken:#EAEEED;--ink:#14181C;--ink-2:#414B52;--ink-3:#6B767D;
+  --line:#D8DEDC;--line-2:#C3CBC9;--signal:#0B7A75;--signal-soft:#E2F0EE;--signal-ink:#065551;
+  --run:#B45309;--run-soft:#FBEEDC;--done:#2F7D32;--done-soft:#E4F0E4;--hold:#6B7280;--hold-soft:#E9EBED;
+  --bad:#B3261E;--bad-soft:#FBE9E7;
+  --shadow:0 1px 2px rgba(20,24,28,.06),0 8px 24px -12px rgba(20,24,28,.18);--r:10px;
+  --sans:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --serif:"Source Serif 4",Georgia,serif;--urdu:"Noto Nastaliq Urdu",serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0F1315;--surface:#171C1F;--sunken:#12171A;--ink:#E8EDEB;--ink-2:#AEB9B7;--ink-3:#7C8886;
+  --line:#252D31;--line-2:#333D41;--signal:#4FBFB6;--signal-soft:#12312F;--signal-ink:#8AD9D1;
+  --run:#E0A253;--run-soft:#332616;--done:#6FBF73;--done-soft:#172C19;--hold:#8B959B;--hold-soft:#1D2326;
+  --bad:#F2B8B5;--bad-soft:#3B1A18;--shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px -14px rgba(0,0,0,.7);
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto;padding:28px 22px 72px}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:26px}
+.brand h1{margin:0;font-size:21px;font-weight:600;letter-spacing:-.015em;display:flex;align-items:center;gap:9px}
+.brand p{margin:3px 0 0;color:var(--ink-3);font-size:13.5px}
+.mark{width:22px;height:22px;border-radius:5px;background:var(--signal);display:inline-grid;place-items:center;flex:none}
+.mark span{display:block;width:2px;height:11px;background:var(--surface);box-shadow:4px 0 0 var(--surface),-4px 0 0 var(--surface);border-radius:2px}
+.host{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--surface)}
+.host b{color:var(--done);font-weight:500}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.panel+.panel{margin-top:20px}
+.panel-hd{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.panel-hd h2{margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.panel-bd{padding:18px}
+.field{display:flex;flex-direction:column;gap:7px}
+.field+.field{margin-top:18px}
+.field label{font-size:13px;font-weight:500}
+.field .hint{color:var(--ink-3);font-weight:400}
+textarea,input,select{width:100%;font-family:inherit;font-size:14px;color:var(--ink);background:var(--sunken);border:1px solid var(--line-2);border-radius:8px;padding:10px 12px;resize:vertical;line-height:1.5}
+textarea.urls{font-family:var(--mono);font-size:13px;min-height:52px}
+textarea.ask{min-height:78px}textarea.shape{min-height:60px}
+:is(textarea,input,select):focus-visible{outline:2px solid var(--signal);outline-offset:1px;border-color:var(--signal)}
+.presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px}
+.presets .lbl{font-size:12px;color:var(--ink-3)}
+.chip{font:inherit;font-size:12.5px;cursor:pointer;background:var(--surface);color:var(--ink-2);border:1px solid var(--line-2);border-radius:999px;padding:5px 12px}
+.chip:hover{border-color:var(--signal);color:var(--signal-ink)}
+.chip[aria-pressed="true"]{background:var(--signal-soft);border-color:var(--signal);color:var(--signal-ink);font-weight:500}
+.chip:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+details.adv{margin-top:18px;border-top:1px solid var(--line);padding-top:14px}
+details.adv summary{cursor:pointer;font-size:13px;color:var(--ink-2);list-style:none;display:flex;align-items:center;gap:7px;width:fit-content}
+details.adv summary::-webkit-details-marker{display:none}
+details.adv summary::before{content:"›";font-size:15px;color:var(--ink-3)}
+details.adv[open] summary::before{transform:rotate(90deg)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(212px,1fr));gap:14px;margin-top:15px}
+.grid2 .field+.field{margin-top:0}
+.note{font-size:12.5px;color:var(--ink-3);margin:13px 0 0}
+.runbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.btn{font:inherit;font-size:14px;font-weight:500;cursor:pointer;background:var(--signal);color:#fff;border:1px solid var(--signal);border-radius:8px;padding:9px 22px}
+.btn:hover{background:var(--signal-ink);border-color:var(--signal-ink)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.est{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.counts{display:flex;gap:7px;flex-wrap:wrap}
+.pill{font-family:var(--mono);font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid transparent}
+.pill.done{background:var(--done-soft);color:var(--done);border-color:var(--done)}
+.pill.run{background:var(--run-soft);color:var(--run);border-color:var(--run)}
+.pill.hold{background:var(--hold-soft);color:var(--hold);border-color:var(--hold)}
+.pill.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+.bar{height:5px;background:var(--sunken);border-radius:999px;overflow:hidden;margin:0 18px}
+.bar i{display:block;height:100%;background:var(--signal);border-radius:999px;transition:width .4s ease}
+.rows{margin:0;padding:0;list-style:none}
+.row{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:13px;padding:9px 18px;border-top:1px solid var(--line)}
+.row:first-child{border-top:none}
+.dot{width:8px;height:8px;border-radius:50%;justify-self:center;background:var(--hold)}
+.dot.done{background:var(--done)}.dot.failed{background:var(--bad)}
+.dot.running,.dot.analysing{background:var(--run);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.28}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none!important}.bar i{transition:none}}
+.rtitle{font-family:var(--urdu);font-size:15px;line-height:2.1;direction:rtl;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.doc{padding:20px 22px 24px;font-family:var(--serif)}
+.rec+.rec{border-top:1px solid var(--line);margin-top:20px;padding-top:20px}
+.rec h3{font-size:19px;margin:0 0 4px;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.stamp{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.quote{background:var(--sunken);border-left:3px solid var(--signal);border-radius:0 8px 8px 0;padding:12px 15px;margin:13px 0}
+.quote p{font-family:var(--urdu);font-size:16px;line-height:2.3;direction:rtl;text-align:right;margin:0}
+dl{margin:0;display:grid;gap:13px}
+dt{font-family:var(--sans);font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--signal-ink);margin-bottom:2px}
+dd{margin:0;font-size:15.5px;line-height:1.62;max-width:66ch}
+.empty{padding:22px 18px;color:var(--ink-3);font-size:14px}
+.err{margin:0;padding:14px 18px;background:var(--bad-soft);color:var(--bad);font-size:14px;border-radius:0 0 var(--r) var(--r)}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand">
+      <h1><span class="mark"><span></span></span>Video Knowledge Extractor</h1>
+      <p>Turn any channel into structured, analysed knowledge — in any language.</p>
+    </div>
+    <div class="host"><b>●</b> running locally</div>
+  </div>
+
+  <section class="panel">
+    <div class="panel-hd"><h2>What to analyse</h2></div>
+    <div class="panel-bd">
+      <div class="field">
+        <label for="urls">Links <span class="hint">— channel, playlist or videos, one per line</span></label>
+        <textarea id="urls" class="urls" spellcheck="false" placeholder="https://www.youtube.com/@SomeChannel"></textarea>
+      </div>
+      <div class="field">
+        <label for="ask">What do you want from it?</label>
+        <textarea id="ask" class="ask" placeholder="Describe it in your own words…"></textarea>
+        <div class="presets">
+          <span class="lbl">Start from:</span>
+          <button type="button" class="chip" data-p="audit">Argument audit</button>
+          <button type="button" class="chip" data-p="timeline">Timeline</button>
+          <button type="button" class="chip" data-p="conflicts">Find contradictions</button>
+          <button type="button" class="chip" data-p="points">Key points</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="shape">How should the output look?</label>
+        <textarea id="shape" class="shape" placeholder="A report in English, one section per finding…"></textarea>
+      </div>
+
+      <details class="adv">
+        <summary>Advanced</summary>
+        <div class="grid2">
+          <div class="field"><label for="profile">Expertise</label>
+            <select id="profile">
+              <option value="general">General</option><option value="philosophy-religion">Philosophy &amp; religion</option>
+              <option value="history">History</option><option value="politics">Politics</option>
+              <option value="science">Science</option><option value="business">Business</option>
+            </select></div>
+          <div class="field"><label for="asr">Speech recognition</label>
+            <select id="asr"><option value="faster-whisper">faster-whisper (cross-platform)</option>
+              <option value="mlx">mlx-whisper (Apple Silicon)</option></select></div>
+          <div class="field"><label for="provider">Analysis model</label>
+            <select id="provider"><option value="auto">Auto-detect</option></select></div>
+          <div class="field"><label for="lang">Spoken language <span class="hint">(optional)</span></label>
+            <input id="lang" placeholder="ur, en, ar…"></div>
+          <div class="field"><label for="outlang">Output language</label>
+            <input id="outlang" value="English"></div>
+          <div class="field"><label for="limit">Only first N videos <span class="hint">(0 = all)</span></label>
+            <input id="limit" value="0" inputmode="numeric"></div>
+        </div>
+        <p class="note">Pauses randomly between requests, fetches one video at a time, and stops cleanly if disk space runs low. Finished videos are never fetched twice.</p>
+      </details>
+
+      <div class="runbar">
+        <button class="btn" id="run">Start</button>
+        <label style="font-size:13px;display:flex;gap:6px;align-items:center">
+          <input type="checkbox" id="tonly" style="width:auto"> transcripts only
+        </label>
+        <span class="est" id="est"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel hidden" id="progress">
+    <div class="panel-hd"><h2 id="phase">Progress</h2><div class="counts" id="counts"></div></div>
+    <div class="bar"><i id="fill" style="width:0%"></i></div>
+    <ul class="rows" id="rows"></ul>
+    <p class="err hidden" id="err"></p>
+  </section>
+
+  <section class="panel hidden" id="results">
+    <div class="panel-hd"><h2 id="rhead">Results</h2><div class="counts" id="rcount"></div></div>
+    <div class="doc" id="doc"></div>
+  </section>
+</div>
+
+<script>
+const PRESETS={
+ audit:["Identify every distinct argument or claim. For each one, tell me what is genuinely defensible about it, where a well-informed opponent would attack first, and how it should be reframed to survive scrutiny. Flag any factual or terminological errors explicitly.",
+        "One section per argument, ordered by how badly it needs fixing."],
+ timeline:["Build a chronological timeline of every event described. Capture who was involved, where it happened, and the date as the speaker gives it. Flag any date stated inconsistently.",
+        "A table, earliest first."],
+ conflicts:["Find contradictions, both within a single video and across all of them. Show both statements and say which is better supported.",
+        "A list, most significant first."],
+ points:["Extract the key points actually made, with enough detail that someone who has not watched could use them.",
+        "A bulleted brief."]};
+const $=id=>document.getElementById(id);
+document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+  document.querySelectorAll('.chip').forEach(o=>o.setAttribute('aria-pressed','false'));
+  c.setAttribute('aria-pressed','true');
+  const p=PRESETS[c.dataset.p]; $('ask').value=p[0]; $('shape').value=p[1];
+}));
+fetch('/api/providers').then(r=>r.json()).then(p=>{
+  const sel=$('provider');
+  Object.entries(p).forEach(([n,s])=>{
+    const o=document.createElement('option');
+    o.value=n; o.textContent=n+(s==='ready'?'':' — unavailable');
+    if(s!=='ready') o.disabled=true; sel.appendChild(o);
+  });
+}).catch(()=>{});
+$('run').addEventListener('click',async()=>{
+  const body={urls:$('urls').value,ask:$('ask').value,shape:$('shape').value,
+    profile:$('profile').value,asr:$('asr').value,provider:$('provider').value,
+    lang:$('lang').value,output_language:$('outlang').value,
+    limit:parseInt($('limit').value||'0',10),transcribe_only:$('tonly').checked};
+  $('run').disabled=true; $('progress').classList.remove('hidden');
+  const r=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json(); showErr(e.error||'Could not start.'); $('run').disabled=false;}
+  poll();
+});
+function showErr(m){const e=$('err'); e.textContent=m; e.classList.remove('hidden');}
+const PHASE={idle:'Ready',listing:'Finding videos',transcribing:'Transcribing',
+  analysing:'Analysing',done:'Finished',error:'Stopped'};
+function poll(){
+  fetch('/api/status').then(r=>r.json()).then(j=>{
+    $('phase').textContent=PHASE[j.state]||j.state;
+    $('est').textContent=j.message||'';
+    const vs=j.videos||[], done=vs.filter(v=>v.state==='done').length,
+      run=vs.filter(v=>['running','analysing'].includes(v.state)).length,
+      hold=vs.filter(v=>v.state==='deferred').length,
+      bad=vs.filter(v=>v.state==='failed').length;
+    $('counts').innerHTML=[done&&`<span class="pill done">${done} done</span>`,
+      run&&`<span class="pill run">${run} running</span>`,
+      hold&&`<span class="pill hold">${hold} not released</span>`,
+      bad&&`<span class="pill bad">${bad} failed</span>`].filter(Boolean).join('');
+    $('fill').style.width=vs.length?Math.round(done/vs.length*100)+'%':'0%';
+    $('rows').innerHTML=vs.map(v=>`<li class="row"><span class="dot ${v.state}"></span>
+      <span class="rtitle">${esc(v.title||v.id)}</span>
+      <span class="meta">${v.chars?v.chars.toLocaleString()+' ch · '+v.rate+' ch/s':esc(v.note||v.state)}</span></li>`).join('');
+    if(j.error) showErr(j.error); else $('err').classList.add('hidden');
+    render(j.records||[]);
+    if(['listing','transcribing','analysing'].includes(j.state)) setTimeout(poll,1200);
+    else $('run').disabled=false;
+  }).catch(()=>setTimeout(poll,2500));
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function ts(t){if(!t)return'';const s=Math.floor(t[0]),m=Math.floor(s/60);return m+':'+String(s%60).padStart(2,'0');}
+function render(recs){
+  if(!recs.length){$('results').classList.add('hidden');return;}
+  $('results').classList.remove('hidden');
+  $('rcount').innerHTML=`<span class="pill done">${recs.length} found</span>`;
+  $('doc').innerHTML=recs.map(r=>{
+    const f=r.record||{}, keys=Object.keys(f), head=keys.length?f[keys[0]]:r.record_name;
+    return `<div class="rec"><h3>${esc(head)}</h3>
+      <div class="stamp">${esc(r.video_title||'')} ${ts(r.timestamp)?'· '+ts(r.timestamp):''} · ${esc(r.confidence||'')}</div>
+      ${r.quote_original?`<div class="quote"><p>${esc(r.quote_original)}</p></div>`:''}
+      <dl>${keys.slice(1).map(k=>`<div><dt>${esc(k.replace(/_/g,' '))}</dt><dd>${esc(f[k])}</dd></div>`).join('')}</dl></div>`;
+  }).join('');
+}
+poll();
+</script>
+</body>
+</html>
