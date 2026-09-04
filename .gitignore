@@ -26,3 +26,5 @@ analysis/
 docs/superpowers/
 # superseded by src/vke
 files/
+dist/
+build/

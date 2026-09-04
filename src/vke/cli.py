@@ -58,7 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--shape", default="", help="how the output should look")
     r.add_argument("--preset", choices=sorted(PRESETS), help="a starting point for --ask")
     r.add_argument("--instructions", default="", help="extra steer for this run")
-    r.add_argument("--profile", default="general", help="expertise to bring (see profiles/)")
+    r.add_argument("--profile", default="general",
+                   help="expertise to bring; see `vke profiles`")
     r.add_argument("--provider", default="auto", help="claude-cli | anthropic | openai | ollama")
     r.add_argument("--model", default=None)
     r.add_argument("--asr", default="faster-whisper", choices=["faster-whisper", "mlx"])
@@ -78,17 +79,29 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--host", default="127.0.0.1")
     u.add_argument("--no-browser", action="store_true")
 
+    sub.add_parser("profiles", help="list available expertise profiles")
     sub.add_parser("providers", help="show which analysis backends are usable here")
     return p
 
 
 def _load_profile(name: str) -> str:
+    """Bundled profiles ship inside the package; a ./profiles dir overrides them
+    so users can add or edit expertise without touching the install."""
     for base in (Path.cwd() / "profiles",
-                 Path(__file__).resolve().parent.parent.parent / "profiles"):
+                 Path(__file__).resolve().parent / "profiles"):
         f = base / f"{name}.txt"
         if f.exists():
             return f.read_text("utf-8")
     return ""
+
+
+def list_profiles() -> list[str]:
+    names = set()
+    for base in (Path(__file__).resolve().parent / "profiles",
+                 Path.cwd() / "profiles"):
+        if base.is_dir():
+            names.update(f.stem for f in base.glob("*.txt"))
+    return sorted(names)
 
 
 def cmd_ui(a) -> int:
@@ -242,6 +255,10 @@ def main(argv=None) -> int:
             return cmd_providers()
         if args.command == "ui":
             return cmd_ui(args)
+        if args.command == "profiles":
+            for n in list_profiles():
+                print(f"  {n}")
+            return 0
         return cmd_run(args)
     except Aborted as e:
         print(f"\n  Stopped. {e}\n", file=sys.stderr)
