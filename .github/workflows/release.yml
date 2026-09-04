@@ -1,0 +1,62 @@
+name: Release to PyPI
+
+# Publishes on a version tag. Authentication is OIDC trusted publishing, so no
+# API token is ever created, stored in a secret, or written to a machine.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Tests must pass before anything is built
+        run: python tests/test_pipeline.py
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: The wheel must actually contain the profiles and the UI
+        # These live outside the import path by nature and have been dropped
+        # from a wheel before. A silent omission degrades --profile without
+        # any error, so it is worth failing the release over.
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          profiles = [n for n in names if "/profiles/" in n and n.endswith(".txt")]
+          page = [n for n in names if n.endswith("static/index.html")]
+          print(f"profiles: {len(profiles)}  ui page: {len(page)}")
+          if len(profiles) < 6 or not page:
+              sys.exit("wheel is missing bundled data files")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # the OIDC token; this is what replaces a password
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
