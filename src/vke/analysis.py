@@ -64,17 +64,70 @@ class Plan:
         return "{\n" + ",\n".join(lines) + "\n}"
 
 
+def _coerce_fields(data) -> list[dict]:
+    """Accept the shapes models actually return, not just the one we asked for.
+
+    Smaller models wrap the answer, rename the key, or return a bare list of
+    field names. All of those are usable; refusing them wastes a call.
+    """
+    if isinstance(data, list):                       # bare list of fields
+        candidates = data
+    elif isinstance(data, dict):
+        candidates = None
+        for key in ("fields", "record_fields", "schema", "properties", "columns"):
+            if isinstance(data.get(key), list):
+                candidates = data[key]
+                break
+        if candidates is None:
+            # a single nested object, e.g. {"schema": {"fields": [...]}}
+            for value in data.values():
+                if isinstance(value, dict) and isinstance(value.get("fields"), list):
+                    candidates = value["fields"]
+                    break
+        if candidates is None:
+            return []
+    else:
+        return []
+
+    fields = []
+    for item in candidates:
+        if isinstance(item, dict):
+            name = item.get("name") or item.get("field") or item.get("key")
+            if name:
+                fields.append({"name": str(name),
+                               "description": item.get("description", "")})
+        elif isinstance(item, str) and item.strip():
+            fields.append({"name": item.strip(), "description": ""})
+    return fields
+
+
 def plan_schema(provider, request: str, output_shape: str = "") -> Plan:
     user = f"The user wants this from the video:\n\n{request}\n"
     if output_shape:
         user += f"\nThey want the final output to look like:\n{output_shape}\n"
-    user += "\nDesign the record schema."
-    data = extract_json(provider.complete(PLANNER_SYSTEM, user, max_tokens=900))
-    fields = [f for f in data.get("fields", [])
-              if isinstance(f, dict) and f.get("name")]
+    user += "\nDesign the record schema. Return only the JSON object, nothing else."
+
+    raw = provider.complete(PLANNER_SYSTEM, user, max_tokens=900)
+    try:
+        data = extract_json(raw)
+    except Exception as e:
+        raise ValueError(
+            f"Could not read the schema the model proposed ({e}).\n\n"
+            f"  It returned:\n    {raw.strip()[:600] or '(nothing)'}"
+        ) from e
+
+    fields = _coerce_fields(data)
     if not fields:
-        raise ValueError("The model proposed no fields for this request.")
-    return Plan(record_name=data.get("record_name") or "record", fields=fields)
+        raise ValueError(
+            "The model did not propose any fields for this request.\n\n"
+            f"  It returned:\n    {str(data)[:600]}\n\n"
+            "  Try rewording what you want, or use a stronger model."
+        )
+
+    name = "record"
+    if isinstance(data, dict):
+        name = data.get("record_name") or data.get("name") or "record"
+    return Plan(record_name=str(name), fields=fields)
 
 
 def chunk(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> list[str]:

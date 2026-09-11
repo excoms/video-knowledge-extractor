@@ -34,13 +34,44 @@ def _provider(responses):
     return p, calls
 
 
-def test_prompt_goes_on_stdin_not_argv():
-    """A transcript chunk is far too big to be a command-line argument."""
-    p, calls = _provider([Result(0, "the answer")])
-    out = p.complete("SYS", "U" * 40000)
-    assert out == "the answer"
-    assert calls[0]["input"].endswith("U" * 100), "prompt must be on stdin"
-    assert not any(len(a) > 1000 for a in calls[0]["cmd"]), "prompt leaked into argv"
+def test_prompt_is_passed_as_an_argument_not_piped():
+    """`claude -p <prompt>`. Piping the prompt instead yields a *successful*
+    call with an empty result and ~3 input tokens — the prompt never arrives
+    and nothing reports an error. Stubs subprocess.run so the real command
+    construction is exercised, not a stand-in for it."""
+    seen = {}
+
+    def fake_run(cmd, input=None, capture_output=None, text=None, timeout=None):
+        seen["cmd"], seen["input"] = cmd, input
+        return Result(0, "the answer")
+
+    real = mod.subprocess.run
+    mod.subprocess.run = fake_run
+    p = mod.ClaudeCliProvider.__new__(mod.ClaudeCliProvider)
+    p.model, p.exe = None, "/usr/local/bin/claude"
+    try:
+        assert p.complete("SYS", "USER-BODY") == "the answer"
+    finally:
+        mod.subprocess.run = real
+
+    assert seen["input"] is None, "prompt must not be piped"
+    assert "USER-BODY" in " ".join(seen["cmd"]), "prompt must be an argument"
+    assert seen["cmd"][1] == "-p"
+    assert "--output-format" in seen["cmd"]
+
+
+def test_empty_result_on_a_successful_call_is_an_error():
+    """The exact failure seen in the wild: subtype success, result empty."""
+    p, _ = _provider([Result(0, '{"type":"result","subtype":"success",'
+                                '"is_error":false,"result":"",'
+                                '"usage":{"input_tokens":3}}')])
+    try:
+        p.complete("s", "u")
+    except ProviderError as e:
+        assert "empty response" in str(e)
+        assert "3 input tokens" in str(e), "should name the giveaway"
+    else:
+        raise AssertionError("an empty result should raise")
 
 
 def test_json_envelope_is_unwrapped_not_returned_raw():

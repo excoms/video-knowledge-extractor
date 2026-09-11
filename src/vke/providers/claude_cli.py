@@ -24,18 +24,23 @@ class ClaudeCliProvider:
             )
 
     # -- helpers -----------------------------------------------------------
-    def _run(self, prompt: str, output_format: str) -> subprocess.CompletedProcess:
-        """Prompt goes on stdin, never argv.
+    def _run(self, prompt: str, output_format: str,
+             on_stdin: bool = False) -> subprocess.CompletedProcess:
+        """`claude -p <prompt>` — the prompt is an argument, not stdin.
 
-        A transcript chunk is tens of thousands of characters; passing that as a
-        command-line argument invites length limits and shell-quoting problems
-        that surface as empty output rather than a clear error.
+        Piping it in instead produces a *successful* call with an empty result
+        and an input-token count of about 3: the prompt simply never arrives,
+        and nothing reports an error. argv is safe here — macOS allows about a
+        megabyte, far beyond any chunk we send.
         """
-        cmd = [self.exe, "-p", "--output-format", output_format]
+        cmd = [self.exe, "-p"]
+        if not on_stdin:
+            cmd.append(prompt)
+        cmd += ["--output-format", output_format]
         if self.model:
             cmd += ["--model", self.model]
-        return subprocess.run(cmd, input=prompt, capture_output=True,
-                              text=True, timeout=TIMEOUT)
+        return subprocess.run(cmd, input=prompt if on_stdin else None,
+                              capture_output=True, text=True, timeout=TIMEOUT)
 
     @staticmethod
     def _unwrap(out: str) -> str:
@@ -53,6 +58,19 @@ class ClaudeCliProvider:
             for key in ("result", "text", "content"):
                 if isinstance(data.get(key), str) and data[key].strip():
                     return data[key]
+            if "result" in data:
+                # A successful call with an empty result means the prompt did
+                # not reach the model. Say that, rather than handing the caller
+                # the envelope to choke on.
+                used = (data.get("usage") or {}).get("input_tokens")
+                raise ProviderError(
+                    "claude CLI completed but returned an empty response"
+                    + (f" (it received only {used} input tokens, so the prompt "
+                       f"did not reach it)" if isinstance(used, int) and used < 50
+                       else "")
+                    + ".\n  Check `claude -p 'say OK'` works in a terminal, "
+                      "or use --provider anthropic."
+                )
         return out
 
     def _fail(self, stage: str, r: subprocess.CompletedProcess) -> ProviderError:
