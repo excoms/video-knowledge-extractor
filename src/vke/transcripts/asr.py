@@ -65,16 +65,32 @@ def pick_backend(requested: str = "auto") -> str:
         if available.get(requested) == "ready":
             return requested
         raise AsrUnavailable(
-            f"{requested} cannot be used: {available.get(requested, 'unknown backend')}"
+            _diagnosis(f"Speech recognition backend {requested!r} cannot be used: "
+                       f"{available.get(requested, 'unknown backend')}")
         )
     for name in ("mlx", "faster-whisper"):
         if available.get(name) == "ready":
             return name
-    raise AsrUnavailable(
-        "No speech recognition backend is installed.\n"
-        f"  {INSTALL_HINT['faster-whisper']}\n"
-        f"  {INSTALL_HINT['mlx']}"
-    )
+    raise AsrUnavailable(_diagnosis("No speech recognition backend is usable."))
+
+
+def _diagnosis(headline: str) -> str:
+    """Say what was checked and what to do, not just what failed."""
+    import sys
+    lines = [headline, ""]
+    lines.append(f"  platform : {platform.system()} {platform.machine()}")
+    lines.append(f"  python   : {sys.executable}")
+    lines.append("  backends :")
+    for name, status in available_backends().items():
+        lines.append(f"    {name:16} {status}")
+    lines.append("")
+    lines.append("  Install one of:")
+    for hint in INSTALL_HINT.values():
+        lines.append(f"    {hint}")
+    lines.append("")
+    lines.append("  Then run `vke providers` to confirm, and restart `vke ui`")
+    lines.append("  if it is running — a running server keeps the old code.")
+    return "\n".join(lines)
 
 
 def _download_audio(ref, tmp_dir: Path, limits=None) -> tuple[Path, dict]:
@@ -124,12 +140,18 @@ def _run_mlx(wav: Path, model_name: str, language: str | None):
     return out, r.get("language", language or "unknown")
 
 
-def transcribe(ref, backend: str = "faster-whisper", model: str | None = None,
+def transcribe(ref, backend: str = "auto", model: str | None = None,
                language: str | None = None, tmp_dir: Path | None = None,
                limits=None):
-    """Download audio, transcribe it, delete the audio. Always."""
+    """Download audio, transcribe it, delete the audio. Always.
+
+    The backend is resolved here as well as at the entry points: a guard that
+    only sits on the callers is one refactor away from being bypassed, and the
+    failure it prevents is a confusing error after a download has already run.
+    """
     from . import Segment, Transcript
 
+    backend = pick_backend(backend or "auto")
     tmp_dir = tmp_dir or Path(".vke-tmp")
     model = model or DEFAULT_MODEL.get(backend, DEFAULT_MODEL["faster-whisper"])
 

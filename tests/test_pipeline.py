@@ -123,6 +123,54 @@ def test_pick_backend_auto_returns_something_usable_or_explains():
         assert "pip install" in str(e)            # must be actionable
 
 
+def test_transcribe_refuses_an_unavailable_backend_before_downloading():
+    """The guard must sit at the point of use, not only on the callers.
+
+    Regression: entry points resolved the backend but transcribe() defaulted to
+    faster-whisper, so any other caller reached the old failure after the audio
+    had already been fetched.
+    """
+    import inspect
+
+    from vke.transcripts import asr as asr_mod
+
+    assert inspect.signature(asr_mod.transcribe).parameters["backend"].default == "auto"
+
+    av = available_backends()
+    missing = [n for n, s in av.items() if s != "ready"]
+    if not missing:
+        return
+
+    class Ref:
+        video_id, title, url = "x", "t", "https://example.invalid/x"
+
+    downloaded = []
+    original = asr_mod._download_audio
+    asr_mod._download_audio = lambda *a, **k: downloaded.append(1)
+    try:
+        asr_mod.transcribe(Ref(), backend=missing[0])
+    except AsrUnavailable:
+        pass
+    else:
+        raise AssertionError("should have refused before downloading")
+    finally:
+        asr_mod._download_audio = original
+    assert not downloaded, "refused only after downloading audio"
+
+
+def test_failure_message_explains_rather_than_just_reporting():
+    av = available_backends()
+    missing = [n for n, s in av.items() if s != "ready"]
+    if not missing:
+        return
+    try:
+        pick_backend(missing[0])
+    except AsrUnavailable as e:
+        text = str(e)
+        for expected in ("platform", "backends", "pip install", "restart"):
+            assert expected in text, f"diagnosis is missing {expected!r}"
+
+
 def test_transcript_char_rate():
     t = Transcript("v", "t", "u", "x" * 800, "ur", "asr:test", 100.0)
     assert t.char_rate == 8.0
