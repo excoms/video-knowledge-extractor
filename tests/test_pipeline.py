@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from vke.analysis import analyse, chunk, locate_quote, plan_schema  # noqa: E402
 from vke.normalise import clean_text                                # noqa: E402
+from vke.transcripts.asr import (AsrUnavailable, available_backends,  # noqa: E402
+                                 pick_backend, _installed)
 from vke.transcripts import Segment, Transcript                     # noqa: E402
 
 SAMPLE = ("واجب الوجود ایسے وجود کو کہا جاتا ہے جس کا موجود ہونا ایسا لابدی ہو "
@@ -78,6 +80,47 @@ def test_analyse_wraps_records_in_the_envelope():
         assert key in r, f"envelope missing {key}"
     assert r["video_id"] == "vid1"
     assert set(r["record"]) == {"claim", "vulnerability"}
+
+
+def test_backend_detection_does_not_import_the_module():
+    """find_spec, not import: mlx_whisper raises on import without a Metal
+    device, which would make an installed backend look missing."""
+    import sys
+    sys.modules.pop("mlx_whisper", None)
+    _installed("mlx_whisper")
+    assert "mlx_whisper" not in sys.modules
+    assert _installed("definitely_not_a_real_module_xyz") is False
+    assert _installed("json") is True
+
+
+def test_available_backends_reports_every_backend_with_a_reason():
+    av = available_backends()
+    assert set(av) == {"faster-whisper", "mlx"}
+    for name, status in av.items():
+        assert status == "ready" or len(status) > 10, \
+            f"{name} must say why it is unusable, got {status!r}"
+
+
+def test_pick_backend_refuses_an_unavailable_choice_by_name():
+    av = available_backends()
+    missing = [n for n, s in av.items() if s != "ready"]
+    if not missing:
+        return                                   # everything installed here
+    try:
+        pick_backend(missing[0])
+    except AsrUnavailable as e:
+        assert missing[0] in str(e)
+    else:
+        raise AssertionError("should have refused an unavailable backend")
+
+
+def test_pick_backend_auto_returns_something_usable_or_explains():
+    av = available_backends()
+    try:
+        chosen = pick_backend("auto")
+        assert av[chosen] == "ready"
+    except AsrUnavailable as e:
+        assert "pip install" in str(e)            # must be actionable
 
 
 def test_transcript_char_rate():

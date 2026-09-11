@@ -62,7 +62,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="expertise to bring; see `vke profiles`")
     r.add_argument("--provider", default="auto", help="claude-cli | anthropic | openai | ollama")
     r.add_argument("--model", default=None)
-    r.add_argument("--asr", default="faster-whisper", choices=["faster-whisper", "mlx"])
+    r.add_argument("--asr", default="auto",
+                   choices=["auto", "faster-whisper", "mlx"],
+                   help="speech recognition backend (default: whichever is installed)")
     r.add_argument("--asr-model", default=None)
     r.add_argument("--lang", default=None, help="spoken language hint, e.g. ur")
     r.add_argument("--captions", default="", help="try these caption languages first, e.g. en,ur")
@@ -121,6 +123,16 @@ def cmd_providers() -> int:
         except Exception as e:
             print(f"    unavailable {name}  — {str(e).splitlines()[0][:70]}")
     print(f"\n  Would use: {autodetect()}\n")
+
+    from .transcripts.asr import available_backends, pick_backend
+    print("  Speech recognition\n")
+    for name, status in available_backends().items():
+        print(f"    {'ready      ' if status == 'ready' else 'unavailable'} {name}"
+              f"{'' if status == 'ready' else '  — ' + status}")
+    try:
+        print(f"\n  Would use: {pick_backend('auto')}\n")
+    except Exception as e:
+        print(f"\n  None usable: {str(e).splitlines()[0]}\n")
     return 0
 
 
@@ -131,6 +143,7 @@ def cmd_run(a) -> int:
     from .providers import autodetect, get_provider
     from .sources import resolve_many
     from .transcripts import fetch_captions, transcribe
+    from .transcripts.asr import AsrUnavailable, pick_backend
 
     ask, shape = a.ask, a.shape
     if a.preset and not ask:
@@ -163,6 +176,21 @@ def cmd_run(a) -> int:
 
     caption_langs = [s.strip() for s in a.captions.split(",") if s.strip()]
 
+    # Resolve the backend before fetching anything: discovering that speech
+    # recognition is unavailable after downloading audio wastes the download
+    # and the user's time.
+    asr_backend = None
+    try:
+        asr_backend = pick_backend(a.asr)
+        print(f"  Speech recognition: {asr_backend}")
+    except AsrUnavailable as e:
+        if caption_langs:
+            # Captions may still carry the whole job; carry on without ASR.
+            print(f"  No speech recognition available; captions only.")
+        else:
+            print(f"\n  {e}\n", file=sys.stderr)
+            return 2
+
     # ---- acquire -------------------------------------------------------
     todo = [r for r in store.ordered_todo(refs) if not store.done(r.video_id)]
     for i, ref in enumerate(todo, 1):
@@ -175,7 +203,7 @@ def cmd_run(a) -> int:
                 if t:
                     print(f"        captions ({t.language})", flush=True)
             if t is None:
-                t = transcribe(ref, backend=a.asr, model=a.asr_model,
+                t = transcribe(ref, backend=asr_backend, model=a.asr_model,
                                language=a.lang, tmp_dir=tmp, limits=limits)
                 print(f"        transcribed  {len(t.text)} chars "
                       f"({t.char_rate:.1f} ch/s)", flush=True)

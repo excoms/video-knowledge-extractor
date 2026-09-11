@@ -141,8 +141,7 @@ dd{margin:0;font-size:15.5px;line-height:1.62;max-width:66ch}
               <option value="science">Science</option><option value="business">Business</option>
             </select></div>
           <div class="field"><label for="asr">Speech recognition</label>
-            <select id="asr"><option value="faster-whisper">faster-whisper (cross-platform)</option>
-              <option value="mlx">mlx-whisper (Apple Silicon)</option></select></div>
+            <select id="asr"><option value="auto">Best available</option></select></div>
           <div class="field"><label for="provider">Analysis model</label>
             <select id="provider"><option value="auto">Auto-detect</option></select></div>
           <div class="field"><label for="lang">Spoken language <span class="hint">(optional)</span></label>
@@ -194,6 +193,18 @@ document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
   c.setAttribute('aria-pressed','true');
   const p=PRESETS[c.dataset.p]; $('ask').value=p[0]; $('shape').value=p[1];
 }));
+fetch('/api/asr').then(r=>r.json()).then(a=>{
+  const sel=$('asr');
+  Object.entries(a).forEach(([n,s])=>{
+    const o=document.createElement('option');
+    o.value=n; o.textContent = s==='ready' ? n : n+' — '+s.replace(/ —.*/,'');
+    if(s!=='ready') o.disabled=true; sel.appendChild(o);
+  });
+  if(!Object.values(a).includes('ready')){
+    showErr('No speech recognition backend is installed. Run:  pip install \'video-knowledge-extractor[asr]\'');
+    $('progress').classList.remove('hidden');
+  }
+}).catch(()=>{});
 fetch('/api/providers').then(r=>r.json()).then(p=>{
   const sel=$('provider');
   Object.entries(p).forEach(([n,s])=>{

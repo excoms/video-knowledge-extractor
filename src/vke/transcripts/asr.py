@@ -9,6 +9,8 @@ platform only, never accuracy:
 from __future__ import annotations
 
 import contextlib
+import importlib.util
+import platform
 from pathlib import Path
 
 from ..normalise import clean_text
@@ -18,6 +20,61 @@ DEFAULT_MODEL = {"faster-whisper": "large-v3", "mlx": "mlx-community/whisper-lar
 
 class AsrUnavailable(RuntimeError):
     """The requested backend is not installed."""
+
+
+INSTALL_HINT = {
+    "faster-whisper": "pip install 'video-knowledge-extractor[asr]'",
+    "mlx": "pip install 'video-knowledge-extractor[mlx]'  (Apple Silicon only)",
+}
+
+
+def _installed(module: str) -> bool:
+    """Is the package present, without importing it?
+
+    Importing is not safe as a probe: mlx_whisper raises on import when no Metal
+    device is reachable, which would make an installed backend look missing.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def available_backends() -> dict[str, str]:
+    """Backend -> "ready", or the reason it cannot be used."""
+    apple = platform.system() == "Darwin" and platform.machine() == "arm64"
+    out = {}
+    out["faster-whisper"] = ("ready" if _installed("faster_whisper")
+                             else f"not installed — {INSTALL_HINT['faster-whisper']}")
+    if not apple:
+        out["mlx"] = "Apple Silicon only"
+    else:
+        out["mlx"] = ("ready" if _installed("mlx_whisper")
+                      else f"not installed — {INSTALL_HINT['mlx']}")
+    return out
+
+
+def pick_backend(requested: str = "auto") -> str:
+    """Choose a backend that actually exists.
+
+    Prefers mlx on Apple Silicon, where it is several times faster than
+    faster-whisper on the same weights.
+    """
+    available = available_backends()
+    if requested != "auto":
+        if available.get(requested) == "ready":
+            return requested
+        raise AsrUnavailable(
+            f"{requested} cannot be used: {available.get(requested, 'unknown backend')}"
+        )
+    for name in ("mlx", "faster-whisper"):
+        if available.get(name) == "ready":
+            return name
+    raise AsrUnavailable(
+        "No speech recognition backend is installed.\n"
+        f"  {INSTALL_HINT['faster-whisper']}\n"
+        f"  {INSTALL_HINT['mlx']}"
+    )
 
 
 def _download_audio(ref, tmp_dir: Path, limits=None) -> tuple[Path, dict]:

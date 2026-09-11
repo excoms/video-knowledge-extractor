@@ -82,6 +82,8 @@ def run_job(cfg: dict) -> None:
             _video(r.video_id, title=r.title, state="waiting", chars=0, rate=0, note="")
 
         caption_langs = [s.strip() for s in (cfg.get("captions") or "").split(",") if s.strip()]
+        # Fail before downloading anything, not after.
+        asr_backend = pick_backend(cfg.get("asr") or "auto")
 
         _set(state="transcribing", message=f"{len(refs)} videos")
         for ref in refs:
@@ -98,7 +100,7 @@ def run_job(cfg: dict) -> None:
                 if caption_langs:
                     t = fetch_captions(ref, caption_langs, tmp, limits)
                 if t is None:
-                    t = transcribe(ref, backend=cfg.get("asr", "faster-whisper"),
+                    t = transcribe(ref, backend=asr_backend,
                                    language=cfg.get("lang") or None,
                                    tmp_dir=tmp, limits=limits)
                 store.put_transcript(ref.video_id, t.header(), t.text)
@@ -191,6 +193,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/status":
             with LOCK:
                 return self._json(dict(JOB))
+        if self.path == "/api/asr":
+            from .transcripts.asr import available_backends
+            return self._json(available_backends())
         if self.path == "/api/providers":
             from .providers import REGISTRY, get_provider
             out = {}
