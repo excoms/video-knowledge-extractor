@@ -143,7 +143,7 @@ def cmd_providers() -> int:
 def cmd_run(a) -> int:
     from . import corpus as corpus_mod
     from . import report
-    from .analysis import analyse, plan_schema
+    from .analysis import analyse, identify_speakers, plan_schema
     from .providers import autodetect, get_provider
     from .paths import cache_dir, new_run_dir, write_run_manifest
     from .sources import resolve_many
@@ -251,6 +251,23 @@ def cmd_run(a) -> int:
           f"({', '.join(f['name'] for f in plan.fields)})", flush=True)
 
     profile_text = _load_profile(a.profile)
+
+    # One roster for the whole run. Chunks are analysed independently, so
+    # without it the same person is named differently in each.
+    roster: list[dict] = []
+    if ready:
+        first = store.get_transcript(ready[0].video_id) or ""
+        if first:
+            st0 = store.state[ready[0].video_id]
+            probe = Transcript(video_id=ready[0].video_id,
+                               title=st0.get("title", ready[0].title),
+                               url=ready[0].url, text=first,
+                               language=st0.get("language", ""),
+                               source=st0.get("source", ""),
+                               duration=st0.get("duration", 0))
+            roster = identify_speakers(provider, probe)
+            if roster:
+                print("  Speakers: " + ", ".join(r["name"] for r in roster))
     from .transcripts import Transcript
 
     records: list[dict] = []
@@ -266,7 +283,7 @@ def cmd_run(a) -> int:
         print(f"  [{i}/{len(ready)}] {t.title[:60]}", flush=True)
         try:
             got = analyse(provider, t, plan, ask, a.output_language,
-                          profile_text, a.instructions)
+                          profile_text, a.instructions, speakers=roster)
             records.extend(got)
             print(f"        {len(got)} {plan.record_name}(s)", flush=True)
         except Exception as e:
@@ -289,11 +306,16 @@ def cmd_run(a) -> int:
     if doc:
         print(f"  Word version -> {doc}")
 
-    if not a.no_corpus and len({r['video_id'] for r in records}) > 1:
-        print("  Looking for patterns across all videos ...", flush=True)
-        reg = corpus_mod.build_register(provider, records, ask, a.output_language)
-        if corpus_mod.write_register(reg, outdir / "patterns.md", meta):
-            print(f"  Patterns -> {outdir / 'patterns.md'}")
+    if not a.no_corpus and len(records) >= corpus_mod.MIN_RECORDS:
+        print("  Grouping, scoring and profiling ...", flush=True)
+        meta["source_name"] = ready[0].title if len(ready) == 1 else ", ".join(a.urls)
+        reg = corpus_mod.build_register(provider, records, ask,
+                                        a.output_language, speakers=roster)
+        if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
+            print(f"  Debrief -> {outdir / 'debrief.md'}")
+            doc = report.write_docx(outdir / "debrief.md")
+            if doc:
+                print(f"  Word version -> {doc}")
 
     return 0
 

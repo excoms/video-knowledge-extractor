@@ -47,7 +47,7 @@ def run_job(cfg: dict) -> None:
     """Execute a run, reporting progress into JOB as it goes."""
     from . import corpus as corpus_mod
     from . import report
-    from .analysis import analyse, plan_schema
+    from .analysis import analyse, identify_speakers, plan_schema
     from .cli import _load_profile
     from .limits import Aborted, Limits
     from .providers import autodetect, get_provider
@@ -141,6 +141,20 @@ def run_job(cfg: dict) -> None:
                      f"({', '.join(f['name'] for f in plan.fields)})")
 
         profile_text = _load_profile(cfg.get("profile") or "general")
+
+        # One roster for the whole run. Chunks are analysed independently, so
+        # without it the same person is named differently in each.
+        roster: list[dict] = []
+        if ready:
+            first_text = store.get_transcript(ready[0].video_id) or ""
+            if first_text:
+                st0 = store.state[ready[0].video_id]
+                probe = Transcript(ready[0].video_id, st0.get("title", ready[0].title),
+                                   ready[0].url, first_text, st0.get("language", ""),
+                                   st0.get("source", ""), st0.get("duration", 0))
+                roster = identify_speakers(provider, probe)
+                if roster:
+                    _set(message="Speakers: " + ", ".join(r["name"] for r in roster))
         records: list[dict] = []
         for i, ref in enumerate(ready, 1):
             text = store.get_transcript(ref.video_id)
@@ -154,7 +168,7 @@ def run_job(cfg: dict) -> None:
             _video(ref.video_id, state="analysing", note="reading")
             got = analyse(provider, t, plan, ask,
                           cfg.get("output_language") or "English", profile_text,
-                          cfg.get("instructions", ""))
+                          cfg.get("instructions", ""), speakers=roster)
             records.extend(got)
             _video(ref.video_id, state="done",
                    note=f"{len(got)} {plan.record_name}(s)")
@@ -171,11 +185,15 @@ def run_job(cfg: dict) -> None:
         report.write_json(records, outdir / "analysis.json", meta)
         report.write_markdown(records, outdir / "analysis.md", meta)
         doc = report.write_docx(outdir / "analysis.md")
-        if len({r["video_id"] for r in records}) > 1:
-            _set(message="Looking for patterns across all videos…")
+        if len(records) >= corpus_mod.MIN_RECORDS:
+            _set(message="Grouping, scoring and profiling")
+            meta["source_name"] = (ready[0].title if len(ready) == 1
+                                   else ", ".join(urls))
             reg = corpus_mod.build_register(provider, records, ask,
-                                            cfg.get("output_language") or "English")
-            corpus_mod.write_register(reg, outdir / "patterns.md", meta)
+                                            cfg.get("output_language") or "English",
+                                            speakers=roster)
+            if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
+                report.write_docx(outdir / "debrief.md")
 
         _set(state="done", message=f"{len(records)} records from {len(ready)} videos")
 

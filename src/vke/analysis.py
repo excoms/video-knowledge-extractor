@@ -54,6 +54,56 @@ Rules:
 - Return [] if the transcript genuinely contains nothing matching the request."""
 
 
+ROSTER_SYSTEM = """You identify who is speaking in a transcript.
+
+Return JSON only:
+
+{"speakers": [{"name": "<the name they are given or call each other>",
+               "role": "<host | guest | interviewer | panellist | narrator>",
+               "position": "<the side or view they argue, in one line>"}]}
+
+Rules:
+- Use the plainest form of each name, as a person would write it in a list.
+  Not "Dr Smith (the host)" — just "Dr Smith".
+- 1 to 6 speakers. If only one person speaks, return that one.
+- If a name is never given, use the role: "Host", "Guest", "Caller"."""
+
+
+def identify_speakers(provider, transcript, sample_chars: int = 6000) -> list[dict]:
+    """Work out who is speaking, once, before extracting anything.
+
+    Chunks are analysed independently, so without a shared roster the same
+    person is named differently in each one — "Anjum", "Anjum (host)",
+    "Anjum (the other speaker)" — and nothing can be attributed or scored.
+    """
+    head = transcript.text[:sample_chars]
+    tail = transcript.text[-sample_chars:] if len(transcript.text) > sample_chars * 2 else ""
+    user = (f"VIDEO: {transcript.title}\n\nOPENING:\n{head}\n"
+            + (f"\nCLOSING:\n{tail}\n" if tail else "")
+            + "\nWho is speaking? Return the JSON.")
+    try:
+        data = extract_json(provider.complete(ROSTER_SYSTEM, user, max_tokens=1200))
+    except Exception:
+        return []
+    people = data.get("speakers") if isinstance(data, dict) else None
+    return [p for p in (people or []) if isinstance(p, dict) and p.get("name")]
+
+
+def roster_block(speakers: list[dict]) -> str:
+    if not speakers:
+        return ""
+    lines = ["SPEAKER ROSTER — attribute every record to one of these names,",
+             "spelled exactly as written here:"]
+    for s in speakers:
+        bits = [f'  "{s["name"]}"']
+        if s.get("role"):
+            bits.append(f'({s["role"]})')
+        if s.get("position"):
+            bits.append(f'— {s["position"]}')
+        lines.append(" ".join(bits))
+    return "\n".join(lines) + "\n"
+
+
 @dataclass
 class Plan:
     record_name: str = "record"
@@ -210,7 +260,7 @@ def _dedupe(records: list[dict]) -> list[dict]:
 
 def analyse(provider, transcript, plan: Plan, request: str,
             output_language: str = "English", profile: str = "",
-            instructions: str = "") -> list[dict]:
+            instructions: str = "", speakers: list[dict] | None = None) -> list[dict]:
     """Extract records from one transcript. Returns envelope-wrapped records."""
     chunks = chunk(transcript.text)
     records: list[dict] = []
@@ -227,6 +277,8 @@ def analyse(provider, transcript, plan: Plan, request: str,
             f"Write the field values in {output_language}. "
             f"Keep 'quote' in the transcript's original language.\n"
         )
+        if speakers:
+            user += "\n" + roster_block(speakers)
         if instructions:
             user += f"\nADDITIONAL INSTRUCTIONS FROM THE USER:\n{instructions}\n"
         if len(chunks) > 1:
