@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Tests must pass before anything is built
-        run: python tests/test_pipeline.py
+        run: python tests/run_all.py
 
       - name: Build
         run: |

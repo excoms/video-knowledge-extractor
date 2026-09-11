@@ -54,6 +54,7 @@ def run_job(cfg: dict) -> None:
     from .sources import resolve_many
     from .store import Store
     from .transcripts import Transcript, fetch_captions, transcribe
+    from .transcripts.asr import AsrUnavailable, pick_backend
 
     try:
         urls = [u.strip() for u in cfg.get("urls", "").splitlines() if u.strip()]
