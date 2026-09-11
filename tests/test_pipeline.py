@@ -171,6 +171,69 @@ def test_failure_message_explains_rather_than_just_reporting():
             assert expected in text, f"diagnosis is missing {expected!r}"
 
 
+def test_serve_steps_past_a_busy_port():
+    """A stale copy of the tool holding the port must not stop a new one.
+
+    Regression: an older server kept port 7864 and kept serving its own stale
+    code, so every fix looked like it had not worked.
+    """
+    from vke import ui
+
+    tried = []
+
+    class Busy(OSError):
+        def __init__(self):
+            super().__init__(48, "Address already in use")
+            self.errno = 48
+
+    class FakeServer:
+        def __init__(self, addr, handler):
+            tried.append(addr[1])
+            if addr[1] < 7866:                  # first two ports occupied
+                raise Busy()
+
+        def serve_forever(self):
+            raise KeyboardInterrupt              # stop immediately
+
+        def shutdown(self):
+            pass
+
+    real_server, real_holder = ui.ThreadingHTTPServer, ui._port_holder
+    ui.ThreadingHTTPServer = FakeServer
+    ui._port_holder = lambda port: "fake-holder"
+    try:
+        ui.serve(port=7864, open_browser=False)
+    finally:
+        ui.ThreadingHTTPServer, ui._port_holder = real_server, real_holder
+
+    assert tried == [7864, 7865, 7866], f"should step forward, tried {tried}"
+
+
+def test_serve_explains_when_every_port_is_taken():
+    from vke import ui
+
+    class AlwaysBusy:
+        def __init__(self, addr, handler):
+            e = OSError(48, "Address already in use")
+            e.errno = 48
+            raise e
+
+    real_server, real_holder = ui.ThreadingHTTPServer, ui._port_holder
+    ui.ThreadingHTTPServer = AlwaysBusy
+    ui._port_holder = lambda port: "Python 999 excoms"
+    try:
+        ui.serve(port=7864, open_browser=False, max_tries=3)
+    except SystemExit as e:
+        text = str(e)
+        assert "7864-7866" in text
+        assert "lsof -ti:7864" in text          # must be actionable
+        assert "Python 999" in text             # must name the holder
+    else:
+        raise AssertionError("should have exited with an explanation")
+    finally:
+        ui.ThreadingHTTPServer, ui._port_holder = real_server, real_holder
+
+
 def test_transcript_char_rate():
     t = Transcript("v", "t", "u", "x" * 800, "ur", "asr:test", 100.0)
     assert t.char_rate == 8.0

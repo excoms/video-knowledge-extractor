@@ -227,8 +227,58 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
 
-def serve(host: str = "127.0.0.1", port: int = 7864, open_browser: bool = True) -> None:
-    httpd = ThreadingHTTPServer((host, port), Handler)
+def _port_holder(port: int) -> str:
+    """Who is on this port? Best effort — purely to make the message useful."""
+    import shutil
+    import subprocess
+    if not shutil.which("lsof"):
+        return ""
+    try:
+        out = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=5).stdout.strip().splitlines()
+        return out[1] if len(out) > 1 else ""
+    except Exception:
+        return ""
+
+
+def serve(host: str = "127.0.0.1", port: int = 7864, open_browser: bool = True,
+          max_tries: int = 12) -> None:
+    """Start the interface, stepping past a busy port rather than dying on it.
+
+    An older copy of this tool left running is the common case, and it is a
+    nasty one: it holds the port and keeps serving its own stale code, so every
+    fix looks like it did not work. Falling forward to a free port means the
+    browser lands on the new server instead.
+    """
+    httpd = None
+    first = port
+    for candidate in range(first, first + max_tries):
+        try:
+            httpd = ThreadingHTTPServer((host, candidate), Handler)
+            port = candidate
+            break
+        except OSError as e:
+            if e.errno not in (48, 98):        # EADDRINUSE on macOS / Linux
+                raise
+            continue
+
+    if httpd is None:
+        holder = _port_holder(first)
+        raise SystemExit(
+            f"\n  Ports {first}-{first + max_tries - 1} are all in use.\n"
+            + (f"  {first} is held by: {holder}\n" if holder else "")
+            + f"\n  Stop whatever is on {first} and try again:\n"
+              f"    lsof -ti:{first} | xargs kill\n"
+        )
+
+    if port != first:
+        holder = _port_holder(first)
+        print(f"\n  Port {first} was busy" + (f" (held by: {holder})" if holder else "")
+              + f"\n  — probably an older copy of this tool still running.")
+        print(f"  Using port {port} instead. To tidy up later:  "
+              f"lsof -ti:{first} | xargs kill")
+
     url = f"http://{host}:{port}"
     print(f"\n  Video Knowledge Extractor")
     print(f"  {url}")
