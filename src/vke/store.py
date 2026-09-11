@@ -39,10 +39,35 @@ class Store:
         self.state.setdefault(vid, {}).update(fields)
         self.save()
 
-    def put_transcript(self, vid: str, header: str, text: str) -> Path:
+    def put_transcript(self, vid: str, header: str, text: str,
+                       segments=None) -> Path:
+        """Save the transcript, and the segment timings beside it.
+
+        Timings are what let a quote be traced back to the second it was
+        spoken. Without them a later analysis run — which always rebuilds the
+        transcript from here — produces records with no timestamp at all.
+        """
         p = self.transcripts / f"{vid}.txt"
         p.write_text(f"{header}\n{'-' * 60}\n\n{text}\n", encoding="utf-8")
+        if segments:
+            (self.transcripts / f"{vid}.segments.json").write_text(
+                json.dumps([[round(s.start, 2), round(s.end, 2), s.text]
+                            for s in segments], ensure_ascii=False),
+                encoding="utf-8")
         return p
+
+    def get_segments(self, vid: str) -> list:
+        """Segment timings for a saved transcript, or [] if none were kept."""
+        from .transcripts import Segment
+
+        f = self.transcripts / f"{vid}.segments.json"
+        if not f.exists():
+            return []
+        try:
+            raw = json.loads(f.read_text("utf-8"))
+        except json.JSONDecodeError:
+            return []
+        return [Segment(float(a), float(b), t) for a, b, t in raw]
 
     def get_transcript(self, vid: str) -> str | None:
         p = self.transcripts / f"{vid}.txt"

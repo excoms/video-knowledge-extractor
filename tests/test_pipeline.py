@@ -9,7 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from vke.analysis import analyse, chunk, locate_quote, plan_schema  # noqa: E402
+from vke.analysis import (analyse, chunk, estimate_from_offset,  # noqa: E402
+                          locate_quote, plan_schema)
 from vke.normalise import clean_text                                # noqa: E402
 from vke.transcripts.asr import (AsrUnavailable, available_backends,  # noqa: E402
                                  pick_backend, _installed)
@@ -232,6 +233,34 @@ def test_serve_explains_when_every_port_is_taken():
         raise AssertionError("should have exited with an explanation")
     finally:
         ui.ThreadingHTTPServer, ui._port_holder = real_server, real_holder
+
+
+def test_estimated_timestamp_tracks_position_in_the_text():
+    """When segment timings were not kept, position in the transcript is a
+    usable proxy — speech rate held at 7.7-8.6 chars/sec across a 17-video
+    corpus. It is an estimate and must be labelled as one, but null helps
+    nobody looking for a moment in a two-hour video."""
+    text = "start " + ("filler " * 500) + "TARGET PHRASE HERE " + ("filler " * 500)
+    early = estimate_from_offset(text, "start", 1000.0)
+    late = estimate_from_offset(text, "TARGET PHRASE HERE", 1000.0)
+    assert early and late
+    assert early[0] < late[0], "later text must estimate a later time"
+    assert 400 < late[0] < 600, f"midpoint phrase should land mid-video, got {late}"
+    assert estimate_from_offset(text, "not in the transcript at all", 1000.0) is None
+    assert estimate_from_offset("", "x", 10.0) is None
+    assert estimate_from_offset(text, "start", 0) is None
+
+
+def test_records_say_whether_a_timestamp_was_measured_or_estimated():
+    provider = StubProvider()
+    plan = plan_schema(provider, "Find every argument")
+    t = Transcript("v", "t", "u", SAMPLE, "ur", "asr:test", 60.0, [])   # no segments
+    records = analyse(provider, t, plan, "Find every argument")
+    assert records
+    r = records[0]
+    assert "timestamp_source" in r
+    if r["timestamp"]:
+        assert r["timestamp_source"] in ("segments", "estimated")
 
 
 def test_transcript_char_rate():

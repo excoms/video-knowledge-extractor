@@ -207,7 +207,7 @@ def cmd_run(a) -> int:
                                language=a.lang, tmp_dir=tmp, limits=limits)
                 print(f"        transcribed  {len(t.text)} chars "
                       f"({t.char_rate:.1f} ch/s)", flush=True)
-            store.put_transcript(ref.video_id, t.header(), t.text)
+            store.put_transcript(ref.video_id, t.header(), t.text, t.segments)
             store.mark(ref.video_id, status="ok", title=t.title,
                        duration=t.duration, chars=len(t.text),
                        source=t.source, language=t.language)
@@ -248,7 +248,8 @@ def cmd_run(a) -> int:
         st = store.state[ref.video_id]
         t = Transcript(video_id=ref.video_id, title=st.get("title", ref.title),
                        url=ref.url, text=text, language=st.get("language", ""),
-                       source=st.get("source", ""), duration=st.get("duration", 0))
+                       source=st.get("source", ""), duration=st.get("duration", 0),
+                            segments=store.get_segments(ref.video_id))
         print(f"  [{i}/{len(ready)}] {t.title[:60]}", flush=True)
         try:
             got = analyse(provider, t, plan, ask, a.output_language,

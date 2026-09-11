@@ -104,7 +104,7 @@ def run_job(cfg: dict) -> None:
                     t = transcribe(ref, backend=asr_backend,
                                    language=cfg.get("lang") or None,
                                    tmp_dir=tmp, limits=limits)
-                store.put_transcript(ref.video_id, t.header(), t.text)
+                store.put_transcript(ref.video_id, t.header(), t.text, t.segments)
                 store.mark(ref.video_id, status="ok", title=t.title, duration=t.duration,
                            chars=len(t.text), source=t.source, language=t.language)
                 _video(ref.video_id, state="done", title=t.title, chars=len(t.text),
@@ -145,7 +145,8 @@ def run_job(cfg: dict) -> None:
             st = store.state[ref.video_id]
             t = Transcript(ref.video_id, st.get("title", ref.title), ref.url, text,
                            st.get("language", ""), st.get("source", ""),
-                           st.get("duration", 0))
+                           st.get("duration", 0),
+                                segments=store.get_segments(ref.video_id))
             _video(ref.video_id, state="analysing", note="reading")
             got = analyse(provider, t, plan, ask,
                           cfg.get("output_language") or "English", profile_text,

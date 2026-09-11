@@ -62,7 +62,9 @@ def write_markdown(records: list[dict], path: Path, meta: dict) -> Path:
             if rec.get("speaker") and rec["speaker"] != "unclear":
                 bits.append(rec["speaker"])
             if ts:
-                bits.append(f"at {ts}")
+                bits.append(f"at {ts}"
+                            + (" (approx)" if rec.get("timestamp_source") == "estimated"
+                               else ""))
             if rec.get("confidence"):
                 bits.append(f"confidence: {rec['confidence']}")
             if bits:
