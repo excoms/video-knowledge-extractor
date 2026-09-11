@@ -31,3 +31,5 @@ files/
 dist/
 build/
 dist/
+Test claude.command
+diagnosis.txt

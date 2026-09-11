@@ -23,6 +23,7 @@ def _provider(responses):
     calls = []
     p = mod.ClaudeCliProvider.__new__(mod.ClaudeCliProvider)
     p.model, p.exe = None, "/usr/local/bin/claude"
+    p.candidates, p._tried = ["/usr/local/bin/claude"], set()
     seq = list(responses)
 
     def fake_run(cmd, input=None, capture_output=None, text=None, timeout=None):
@@ -49,6 +50,7 @@ def test_prompt_is_passed_as_an_argument_not_piped():
     mod.subprocess.run = fake_run
     p = mod.ClaudeCliProvider.__new__(mod.ClaudeCliProvider)
     p.model, p.exe = None, "/usr/local/bin/claude"
+    p.candidates, p._tried = ["/usr/local/bin/claude"], set()
     try:
         assert p.complete("SYS", "USER-BODY") == "the answer"
     finally:
@@ -129,6 +131,44 @@ def test_timeout_is_reported_with_advice():
         assert "timed out" in str(e) and "anthropic" in str(e)
     else:
         raise AssertionError("timeout should raise")
+
+
+def test_falls_back_to_another_install_when_the_first_returns_empty():
+    """Observed in the wild: npm-global 2.1.83 returns an empty result in -p
+    mode while the native 2.1.81 beside it works. Move down the list rather
+    than failing on whichever happens to be first on PATH."""
+    empty = '{"type":"result","subtype":"success","result":"","usage":{"input_tokens":3}}'
+    used = []
+
+    p = mod.ClaudeCliProvider.__new__(mod.ClaudeCliProvider)
+    p.model = None
+    p.candidates = ["/usr/local/bin/claude", "/home/u/.local/bin/claude"]
+    p.exe, p._tried = p.candidates[0], set()
+
+    def fake_run(prompt, fmt):
+        used.append(p.exe)
+        if p.exe == p.candidates[0]:
+            return Result(0, "" if fmt == "text" else empty)
+        return Result(0, "the real answer")
+
+    p._run = fake_run
+    assert p.complete("s", "u") == "the real answer"
+    assert p.candidates[1] in used, "should have tried the second install"
+
+
+def test_reports_every_install_when_all_are_empty():
+    empty = '{"type":"result","subtype":"success","result":"","usage":{"input_tokens":3}}'
+    p = mod.ClaudeCliProvider.__new__(mod.ClaudeCliProvider)
+    p.model = None
+    p.candidates = ["/a/claude", "/b/claude"]
+    p.exe, p._tried = p.candidates[0], set()
+    p._run = lambda prompt, fmt: Result(0, "" if fmt == "text" else empty)
+    try:
+        p.complete("s", "u")
+    except ProviderError as e:
+        assert "/a/claude" in str(e) and "/b/claude" in str(e)
+    else:
+        raise AssertionError("should fail once every install is exhausted")
 
 
 if __name__ == "__main__":

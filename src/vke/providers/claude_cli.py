@@ -3,6 +3,7 @@ no per-run cost. Usually the cheapest option for someone who already has one."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 
@@ -16,12 +17,35 @@ class ClaudeCliProvider:
 
     def __init__(self, model: str | None = None):
         self.model = model
-        self.exe = shutil.which("claude")
-        if not self.exe:
+        self.candidates = self._find_installs()
+        if not self.candidates:
             raise ProviderError(
                 "The `claude` CLI is not on PATH. Install Claude Code, or pick "
                 "another provider with --provider."
             )
+        self.exe = self.candidates[0]
+        self._tried: set[str] = set()
+
+    @staticmethod
+    def _find_installs() -> list[str]:
+        """Every claude on this machine, PATH first.
+
+        More than one install is common, and they are not interchangeable:
+        a 2.1.83 npm-global build was observed returning an empty result in
+        -p mode while the native 2.1.81 alongside it worked. When the first
+        choice comes back empty we move down this list rather than failing.
+        """
+        found, seen = [], set()
+        for path in (shutil.which("claude"),
+                     os.path.expanduser("~/.local/bin/claude"),
+                     "/usr/local/bin/claude",
+                     "/opt/homebrew/bin/claude"):
+            if path and os.path.isfile(path) and os.access(path, os.X_OK):
+                real = os.path.realpath(path)
+                if real not in seen:
+                    seen.add(real)
+                    found.append(path)
+        return found
 
     # -- helpers -----------------------------------------------------------
     def _run(self, prompt: str, output_format: str,
@@ -115,6 +139,19 @@ class ClaudeCliProvider:
             raise ProviderError("claude CLI timed out on the retry.") from e
         out2 = (r2.stdout or "").strip()
         if r2.returncode == 0 and out2:
-            return self._unwrap(out2)
+            try:
+                return self._unwrap(out2)
+            except ProviderError:
+                pass                      # empty result — try another install
 
-        raise self._fail("returned no output, on both text and json formats", r2)
+        self._tried.add(self.exe)
+        for candidate in self.candidates:
+            if candidate in self._tried:
+                continue
+            print(f"      {self.exe} returned nothing; trying {candidate}", flush=True)
+            self.exe = candidate
+            return self.complete(system, user, max_tokens)
+
+        raise self._fail(
+            "returned an empty result from every claude installation on this "
+            f"machine ({', '.join(self.candidates)})", r2)
