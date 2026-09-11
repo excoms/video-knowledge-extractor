@@ -7,6 +7,8 @@ be aggregated, counted or piped anywhere.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -83,3 +85,26 @@ def write_markdown(records: list[dict], path: Path, meta: dict) -> Path:
 
     path.write_text("\n".join(L), encoding="utf-8")
     return path
+
+
+def write_docx(markdown_path: Path, out_path: Path | None = None) -> Path | None:
+    """Convert the Markdown report to Word, if pandoc is available.
+
+    Markdown is a developer's format. Most people who want to read a report,
+    mark it up, or send it to someone else want a document. pandoc does this
+    offline and is the only extra needed; without it we simply skip, because
+    the Markdown and JSON are already written.
+    """
+    if not shutil.which("pandoc"):
+        return None
+    out_path = out_path or markdown_path.with_suffix(".docx")
+    try:
+        subprocess.run(
+            ["pandoc", str(markdown_path), "-o", str(out_path),
+             "--toc", "--toc-depth=2",
+             "--metadata", f"title={markdown_path.stem.replace('_', ' ').title()}",
+             "-V", "lang=en"],
+            check=True, capture_output=True, text=True, timeout=120)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    return out_path if out_path.exists() else None

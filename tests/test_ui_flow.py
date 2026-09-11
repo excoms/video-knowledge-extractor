@@ -67,8 +67,9 @@ def _run(tmp: Path, cfg_extra=None, calls=None):
 
     ui.JOB.update(state="idle", message="", videos=[], records=[], error="")
     cfg = {"urls": ref.url, "ask": "Find every argument and its weakness",
-           "shape": "One section each", "outdir": str(tmp), "asr": "auto",
-           "provider": "stub", "output_language": "English"}
+           "shape": "One section each", "outdir": str(tmp),
+           "cache": str(tmp / "_cache"),      # never touch the user's real cache
+           "asr": "auto", "provider": "stub", "output_language": "English"}
     cfg.update(cfg_extra or {})
     try:
         ui.run_job(cfg)
@@ -137,6 +138,34 @@ def test_bad_input_is_reported_not_raised(tmp_path=None):
     job = _run(tmp, {"urls": "   "})
     assert job["state"] == "error"
     assert "link" in job["error"].lower()
+
+
+def test_a_run_folder_is_self_contained_even_when_reusing_the_cache():
+    """The point of a folder per run is that you can move or send it.
+
+    Regression: the CLI skipped cached videos entirely, leaving the run folder
+    empty — the transcript existed only in the shared cache.
+    """
+    import tempfile
+
+    from vke.store import Store
+    from vke.transcripts import Segment
+
+    tmp = Path(tempfile.mkdtemp())
+    cache, run_a, run_b = tmp / "cache", tmp / "run-a", tmp / "run-b"
+
+    first = Store(run_a, cache=cache)
+    first.put_transcript("vidX", "TITLE: T\nURL: u\nDURATION: 60s\nLANGUAGE: ur",
+                         "some words here",
+                         [Segment(0.0, 2.0, "some"), Segment(2.0, 4.0, "words")])
+
+    second = Store(run_b, cache=cache)
+    assert second.done("vidX"), "cache should satisfy a fresh run"
+    assert second.adopt_from_cache("vidX")
+    assert (run_b / "transcripts" / "vidX.txt").exists(), "run folder must hold it"
+    assert (run_b / "transcripts" / "vidX.segments.json").exists(), "timings too"
+    assert second.state["vidX"]["status"] == "ok", "state must be recorded"
+    assert second.get_segments("vidX"), "segments must load in the new run"
 
 
 def test_every_endpoint_the_page_calls_is_handled():

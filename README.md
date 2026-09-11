@@ -100,14 +100,29 @@ at the end.
 
 ## What you get
 
+Every run gets its own dated folder holding everything about it:
+
 ```
-vke-out/
-  transcripts/        one per video, with provenance
-  analysis.json       canonical, machine-readable
-  analysis.md         the readable report
-  patterns.md         what recurs across every video
-  state.json          checkpoint — rerun resumes, never repeats work
+vke-data/
+  runs/
+    2026-09-11_1437_htM_SXcSuHI/
+      run.json          what you asked, and how it was produced
+      transcripts/      one per video, with provenance
+      analysis.json     canonical, machine-readable
+      analysis.md       the readable report
+      analysis.docx     the same, as a Word document
+      patterns.md       what recurs across every video (2+ videos)
+      state.json        checkpoint for this run
+  cache/
+    transcripts/        keyed by video id, shared between runs
 ```
+
+Transcription is the expensive step and depends only on the video, so
+transcripts are cached and never produced twice — point a second run at the
+same channel and it goes straight to analysis. Each transcript is also copied
+into the run folder, so that folder stands alone if you move or send it.
+
+Override either with `--outdir` and `--cache`.
 
 Every record in `analysis.json` carries the same envelope regardless of what you
 asked for:

@@ -263,6 +263,47 @@ def test_records_say_whether_a_timestamp_was_measured_or_estimated():
         assert r["timestamp_source"] in ("segments", "estimated")
 
 
+def test_no_function_uses_a_name_it_never_imports():
+    """Catch the NameError class of bug before a user does.
+
+    Function-local imports are used throughout to keep startup fast, which
+    makes it easy to add a call without adding its import — twice now that
+    has shipped and only failed at runtime.
+    """
+    import ast
+    import builtins
+
+    src_dir = Path(__file__).resolve().parent.parent / "src" / "vke"
+    problems = []
+    for path in sorted(src_dir.rglob("*.py")):
+        tree = ast.parse(path.read_text("utf-8"))
+        top = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+        top |= {t.id for n in tree.body if isinstance(n, ast.Assign)
+                for t in n.targets if isinstance(t, ast.Name)}
+        top |= {n.target.id for n in tree.body
+                if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)}
+        top |= {"__file__", "__name__", "__doc__"}
+        top |= {a.asname or a.name.split(".")[0] for n in tree.body
+                if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+        for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            imported, assigned, used = set(), set(), set()
+            for n in ast.walk(fn):
+                if isinstance(n, (ast.Import, ast.ImportFrom)):
+                    imported |= {a.asname or a.name.split(".")[0] for a in n.names}
+                elif isinstance(n, ast.Name):
+                    (assigned if isinstance(n.ctx, ast.Store) else used).add(n.id)
+                elif isinstance(n, ast.arg):
+                    assigned.add(n.arg)
+                elif isinstance(n, ast.ExceptHandler) and n.name:
+                    assigned.add(n.name)
+                elif isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+                    assigned.add(n.name)
+            missing = used - imported - assigned - top - set(dir(builtins))
+            if missing:
+                problems.append(f"{path.name}:{fn.name} uses {sorted(missing)}")
+    assert not problems, "unresolved names: " + "; ".join(problems)
+
+
 def test_transcript_char_rate():
     t = Transcript("v", "t", "u", "x" * 800, "ur", "asr:test", 100.0)
     assert t.char_rate == 8.0

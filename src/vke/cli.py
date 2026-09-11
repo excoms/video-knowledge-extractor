@@ -70,7 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--captions", default="", help="try these caption languages first, e.g. en,ur")
     r.add_argument("--output-language", default="English")
     r.add_argument("--limit", type=int, default=0, help="only the first N videos")
-    r.add_argument("--outdir", default=None)
+    r.add_argument("--outdir", default=None,
+                   help="where this run's files go (default: a dated folder "
+                        "under vke-data/runs/)")
+    r.add_argument("--cache", default=None,
+                   help="shared transcript cache (default: vke-data/cache/transcripts)")
     r.add_argument("--pause", type=float, default=2.0)
     r.add_argument("--transcribe-only", action="store_true")
     r.add_argument("--no-corpus", action="store_true", help="skip the cross-video pass")
@@ -141,6 +145,7 @@ def cmd_run(a) -> int:
     from . import report
     from .analysis import analyse, plan_schema
     from .providers import autodetect, get_provider
+    from .paths import cache_dir, new_run_dir, write_run_manifest
     from .sources import resolve_many
     from .transcripts import fetch_captions, transcribe
     from .transcripts.asr import AsrUnavailable, pick_backend
@@ -155,8 +160,10 @@ def cmd_run(a) -> int:
         return 2
 
     limits = Limits(pause=a.pause, assume_yes=a.yes)
-    outdir = Path(a.outdir) if a.outdir else Path("vke-out")
-    store = Store(outdir)
+    outdir = (Path(a.outdir) if a.outdir
+              else new_run_dir(a.urls[0], fallback="run"))
+    store = Store(outdir, cache=Path(a.cache) if a.cache else cache_dir())
+    print(f"  Run folder: {outdir}")
     tmp = outdir / ".tmp"
 
     # Sweep orphaned audio from any previously killed run before we add more.
@@ -192,6 +199,12 @@ def cmd_run(a) -> int:
             return 2
 
     # ---- acquire -------------------------------------------------------
+    # A video already in the cache still belongs in this run's folder, or the
+    # folder is not self-contained and cannot be moved or sent on its own.
+    for ref in refs:
+        if store.done(ref.video_id) and store.adopt_from_cache(ref.video_id):
+            print(f"  Reusing cached transcript: {ref.title[:55]}")
+
     todo = [r for r in store.ordered_todo(refs) if not store.done(r.video_id)]
     for i, ref in enumerate(todo, 1):
         print(f"  [{i}/{len(todo)}] {ref.title[:60]}", flush=True)
@@ -264,9 +277,17 @@ def cmd_run(a) -> int:
             "video_count": len(ready), "record_count": len(records),
             "provider": provider_name}
 
+    write_run_manifest(outdir, request=ask, output_shape=shape,
+                       sources=a.urls, profile=a.profile,
+                       provider=provider_name, asr=asr_backend,
+                       output_language=a.output_language,
+                       videos=len(ready), records=len(records))
     report.write_json(records, outdir / "analysis.json", meta)
     report.write_markdown(records, outdir / "analysis.md", meta)
     print(f"\n  {len(records)} records -> {outdir / 'analysis.md'}")
+    doc = report.write_docx(outdir / "analysis.md")
+    if doc:
+        print(f"  Word version -> {doc}")
 
     if not a.no_corpus and len({r['video_id'] for r in records}) > 1:
         print("  Looking for patterns across all videos ...", flush=True)

@@ -1,7 +1,4 @@
 # throwaway spike artefacts
-probe_*/
-corpus_*/
-files.zip
 
 # environments & caches
 .venv/
@@ -17,8 +14,6 @@ __pycache__/
 
 # os
 .DS_Store
-vke-out/
-test-out/
 
 # private: critique of a named individual's work — not for publication
 analysis/
@@ -33,3 +28,6 @@ build/
 dist/
 Test claude.command
 diagnosis.txt
+
+# run outputs, transcript cache and archived working material
+vke-data/

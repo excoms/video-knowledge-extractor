@@ -65,8 +65,11 @@ def run_job(cfg: dict) -> None:
             raise ValueError("Say what you want from the videos.")
 
         limits = Limits(assume_yes=True)
-        outdir = Path(cfg.get("outdir") or "vke-out")
-        store = Store(outdir)
+        from .paths import cache_dir, new_run_dir, write_run_manifest
+        outdir = (Path(cfg["outdir"]) if cfg.get("outdir")
+                  else new_run_dir(urls[0], fallback="run"))
+        store = Store(outdir, cache=Path(cfg["cache"]) if cfg.get("cache")
+                      else cache_dir())
         tmp = outdir / ".tmp"
         for stale in tmp.glob("*.wav"):
             stale.unlink(missing_ok=True)
@@ -89,6 +92,7 @@ def run_job(cfg: dict) -> None:
         _set(state="transcribing", message=f"{len(refs)} videos")
         for ref in refs:
             if store.done(ref.video_id):
+                store.adopt_from_cache(ref.video_id)
                 st = store.state[ref.video_id]
                 _video(ref.video_id, state="done", chars=st.get("chars", 0),
                        rate=round(st.get("chars", 0) / (st.get("duration") or 1), 1),
@@ -159,8 +163,14 @@ def run_job(cfg: dict) -> None:
         meta = {"title": f"{plan.record_name.title()} analysis", "request": ask,
                 "source": ", ".join(urls), "video_count": len(ready),
                 "record_count": len(records), "provider": provider.name}
+        write_run_manifest(outdir, request=ask, output_shape=cfg.get("shape", ""),
+                           sources=urls, profile=cfg.get("profile"),
+                           provider=provider.name, asr=asr_backend,
+                           output_language=cfg.get("output_language"),
+                           videos=len(ready), records=len(records))
         report.write_json(records, outdir / "analysis.json", meta)
         report.write_markdown(records, outdir / "analysis.md", meta)
+        doc = report.write_docx(outdir / "analysis.md")
         if len({r["video_id"] for r in records}) > 1:
             _set(message="Looking for patterns across all videos…")
             reg = corpus_mod.build_register(provider, records, ask,
