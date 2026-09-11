@@ -34,12 +34,16 @@ other ~86 languages are in scope rather than out of it.
 ## Install
 
 ```bash
-pip install video-knowledge-extractor          # core
-pip install 'video-knowledge-extractor[asr]'   # + speech recognition
+pip install video-knowledge-extractor            # core
+pip install 'video-knowledge-extractor[asr]'     # + speech recognition
+pip install 'video-knowledge-extractor[mlx]'     # Apple Silicon: several times faster
 ```
 
 You also need [ffmpeg](https://ffmpeg.org) for audio, and something to do the
 analysis — see [Analysis backends](#analysis-backends).
+
+Run `vke providers` at any point to see which speech-recognition backends and
+analysis models your machine can actually use, and which it would pick.
 
 ## Use it
 
