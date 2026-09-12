@@ -29,6 +29,19 @@ DATA_DIR = "vke-data"
 
 
 def data_root(base: Path | None = None) -> Path:
+    """Where runs and caches live.
+
+    VKE_DATA exists for the desktop build: a double-clicked app has an
+    undefined working directory — on macOS it can be "/" — so the default of
+    cwd/vke-data would put a user's transcripts somewhere unwritable or
+    invisible. An explicit `base` still wins, so tests stay hermetic.
+    """
+    import os
+
+    if base is None:
+        override = os.environ.get("VKE_DATA")
+        if override:
+            return Path(override).expanduser() / DATA_DIR
     return (base or Path.cwd()) / DATA_DIR
 
 

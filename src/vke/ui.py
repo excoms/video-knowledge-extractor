@@ -226,6 +226,97 @@ def run_job(cfg: dict) -> None:
         _set(state="error", error=str(e)[:400], message="Stopped")
 
 
+CHAT_SYSTEM = """You are the analyst inside Video Knowledge Extractor, talking
+to the person who just ran it. You can see the run they are asking about.
+
+Answer from the run when the run contains the answer, and say plainly when it
+does not rather than inventing a plausible detail. If they ask why a speaker
+scored as they did, or why an argument was graded a certain way, cite the
+specific record — the quote, the timestamp, the fallacy named.
+
+Two things you must never soften: attribution in this tool is inferred from
+context rather than heard, because the transcription carries no speaker
+labels; and a counter-argument you compose is your reasoning, not something
+anybody said. Flag both whenever they bear on the answer.
+
+Be brief. This is a chat box, not a report."""
+
+CHAT_CONTEXT_CHARS = 30000
+
+
+def recent_runs(limit: int = 20) -> list[dict]:
+    """Finished runs, newest first, for the chat box to attach itself to."""
+    from .paths import data_root
+
+    runs = data_root() / "runs"
+    if not runs.is_dir():
+        return []
+    out = []
+    for d in sorted((x for x in runs.iterdir() if x.is_dir()),
+                    key=lambda x: x.name, reverse=True)[:limit]:
+        manifest = d / "run.json"
+        title = d.name
+        records = 0
+        if manifest.exists():
+            try:
+                m = json.loads(manifest.read_text("utf-8"))
+                records = m.get("records", 0)
+                srcs = m.get("sources") or []
+                title = f"{d.name} — {records} records"
+                if srcs:
+                    title += f" — {srcs[0][:60]}"
+            except (OSError, json.JSONDecodeError):
+                pass
+        out.append({"dir": d.name, "label": title, "records": records,
+                    "has_report": (d / "debrief.md").exists()})
+    return out
+
+
+def _run_context(name: str) -> str:
+    """The report if there is one, otherwise the records. Reports are already
+    condensed, so they buy far more context per character."""
+    from .paths import data_root
+
+    if not name:
+        return ""
+    d = data_root() / "runs" / name
+    if not d.is_dir() or d.resolve().parent != (data_root() / "runs").resolve():
+        return ""            # never let a path escape the runs directory
+    for candidate in ("debrief.md", "report.md", "analysis.md"):
+        f = d / candidate
+        if f.exists():
+            body = f.read_text("utf-8", errors="replace")
+            head = f"--- {candidate} from run {name} ---\n"
+            if len(body) > CHAT_CONTEXT_CHARS:
+                body = (body[:CHAT_CONTEXT_CHARS]
+                        + f"\n\n[truncated at {CHAT_CONTEXT_CHARS:,} characters "
+                          f"of {len(body):,}]")
+            return head + body
+    return ""
+
+
+def chat_reply(body: dict) -> str:
+    """One turn of conversation, with the chosen run attached."""
+    from .providers import autodetect, get_provider
+
+    message = (body.get("message") or "").strip()
+    if not message:
+        raise ValueError("Nothing to answer.")
+    name = body.get("provider") or "auto"
+    provider = get_provider(autodetect() if name == "auto" else name,
+                            body.get("model") or None)
+
+    parts = []
+    context = _run_context(body.get("run") or "")
+    if context:
+        parts.append(context)
+    for turn in (body.get("history") or [])[-12:]:
+        who = "User" if turn.get("role") == "user" else "You"
+        parts.append(f"{who}: {turn.get('content', '')}")
+    parts.append(f"User: {message}")
+    return provider.complete(CHAT_SYSTEM, "\n\n".join(parts), max_tokens=2000)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):        # keep the terminal readable
         pass
@@ -256,18 +347,37 @@ class Handler(BaseHTTPRequestHandler):
             from .transcripts.asr import available_backends
             return self._json(available_backends())
         if self.path == "/api/providers":
-            from .providers import REGISTRY, get_provider
-            out = {}
-            for n in REGISTRY:
-                try:
-                    get_provider(n)
-                    out[n] = "ready"
-                except Exception as e:
-                    out[n] = str(e).splitlines()[0][:90]
-            return self._json(out)
+            from .providers import describe
+            return self._json(describe())
+        if self.path == "/api/runs":
+            return self._json(recent_runs())
         self._send(404, b"not found", "text/plain")
 
+    def _body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            return json.loads(self.rfile.read(length) or b"{}")
+        except json.JSONDecodeError:
+            return {}
+
     def do_POST(self):
+        if self.path == "/api/provider-key":
+            from .providers import describe, set_key
+            body = self._body()
+            try:
+                set_key(body.get("provider", ""), body.get("key", ""))
+            except Exception as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json(describe())
+
+        if self.path == "/api/chat":
+            body = self._body()
+            try:
+                reply = chat_reply(body)
+            except Exception as e:
+                return self._json({"error": str(e)[:400]}, 400)
+            return self._json({"reply": reply})
+
         if self.path != "/api/run":
             return self._send(404, b"not found", "text/plain")
         with LOCK:

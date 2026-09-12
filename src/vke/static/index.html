@@ -34,6 +34,15 @@ body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);f
 .host{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--surface)}
 .host b{color:var(--done);font-weight:500}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.chat-log{padding:16px 18px;max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:min(62ch,92%);padding:9px 13px;border-radius:var(--r);font-size:14.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.you{align-self:flex-end;background:var(--signal-soft);color:var(--signal-ink);border:1px solid var(--line)}
+.msg.vke{align-self:flex-start;background:var(--sunken);border:1px solid var(--line)}
+.msg.thinking{color:var(--ink-3);font-style:italic}
+.msg.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+.chat-form{display:flex;gap:8px;padding:13px 18px;border-top:1px solid var(--line);align-items:flex-end}
+.chat-form textarea{flex:1;min-height:40px;max-height:160px;resize:vertical;font:inherit}
+.chat-empty{color:var(--ink-3);font-size:13.5px;margin:0}
 .panel+.panel{margin-top:20px}
 .panel-hd{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .panel-hd h2{margin:0;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
@@ -146,7 +155,17 @@ dd{margin:0;font-size:15.5px;line-height:1.62;max-width:66ch}
           <div class="field"><label for="asr">Speech recognition</label>
             <select id="asr"><option value="auto">Best available</option></select></div>
           <div class="field"><label for="provider">Analysis model</label>
-            <select id="provider"><option value="auto">Auto-detect</option></select></div>
+            <select id="provider"><option value="auto">Auto-detect</option></select>
+            <div id="pkeywrap" class="hidden" style="margin-top:7px">
+              <input id="pkey" type="password" autocomplete="off"
+                     placeholder="Paste your API key">
+              <div style="display:flex;gap:7px;align-items:center;margin-top:5px">
+                <button class="btn ghost" id="pkeysave" type="button">Use this key</button>
+                <span class="hint" id="pkeymsg">Kept in memory only, never written to disk.</span>
+              </div>
+            </div>
+            <select id="omodel" class="hidden" style="margin-top:7px"></select>
+          </div>
           <div class="field"><label for="lang">Spoken language <span class="hint">(optional)</span></label>
             <input id="lang" placeholder="ur, en, ar…"></div>
           <div class="field"><label for="outlang">Output language</label>
@@ -178,6 +197,22 @@ dd{margin:0;font-size:15.5px;line-height:1.62;max-width:66ch}
     <div class="panel-hd"><h2 id="rhead">Results</h2><div class="counts" id="rcount"></div></div>
     <div class="doc" id="doc"></div>
   </section>
+
+  <section class="panel" id="chat">
+    <div class="panel-hd">
+      <h2>Ask about a run</h2>
+      <select id="chatrun" style="max-width:52ch"><option value="">No run attached</option></select>
+    </div>
+    <div class="chat-log" id="chatlog">
+      <p class="chat-empty">Pick a run and ask why a speaker scored as they did, what
+        an argument's weakest point was, or how to answer it. Answers come from that
+        run's report.</p>
+    </div>
+    <form class="chat-form" id="chatform">
+      <textarea id="chatbox" rows="1" placeholder="Why did Mazahiri score 4 on intellectual honesty?"></textarea>
+      <button class="btn" id="chatsend" type="submit">Send</button>
+    </form>
+  </section>
 </div>
 
 <script>
@@ -208,17 +243,52 @@ fetch('/api/asr').then(r=>r.json()).then(a=>{
     $('progress').classList.remove('hidden');
   }
 }).catch(()=>{});
-fetch('/api/providers').then(r=>r.json()).then(p=>{
-  const sel=$('provider');
-  Object.entries(p).forEach(([n,s])=>{
-    const o=document.createElement('option');
-    o.value=n; o.textContent=n+(s==='ready'?'':' — unavailable');
-    if(s!=='ready') o.disabled=true; sel.appendChild(o);
+let PROVIDERS={};
+function paintProviders(p){
+  PROVIDERS=p;
+  const sel=$('provider'), keep=sel.value;
+  sel.innerHTML='<option value="auto">Auto-detect</option>';
+  Object.entries(p).forEach(([n,d])=>{
+    const o=document.createElement('option'); o.value=n;
+    // A backend that only wants a key is offered, not disabled - otherwise
+    // there is no way to reach the field that would fix it.
+    const fixable=d.key_env && d.status!=='ready';
+    o.textContent=n+(d.status==='ready'?'':(fixable?' — needs a key':' — unavailable'));
+    o.disabled=(d.status!=='ready' && !fixable);
+    sel.appendChild(o);
   });
-}).catch(()=>{});
+  sel.value=keep&&[...sel.options].some(o=>o.value===keep)?keep:'auto';
+  providerChanged();
+}
+function providerChanged(){
+  const n=$('provider').value, d=PROVIDERS[n]||{};
+  $('pkeywrap').classList.toggle('hidden', !(d.key_env && d.status!=='ready'));
+  const models=(PROVIDERS.ollama||{}).models||[];
+  const showModels=(n==='ollama' && models.length>0);
+  $('omodel').classList.toggle('hidden', !showModels);
+  if(showModels && !$('omodel').options.length)
+    models.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;$('omodel').appendChild(o);});
+}
+$('provider').addEventListener('change',providerChanged);
+$('pkeysave').addEventListener('click',async()=>{
+  const key=$('pkey').value.trim(); if(!key) return;
+  $('pkeymsg').textContent='Checking…';
+  const r=await fetch('/api/provider-key',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({provider:$('provider').value,key})});
+  const j=await r.json();
+  if(!r.ok){$('pkeymsg').textContent=j.error||'That key was not accepted.'; return;}
+  $('pkey').value='';
+  paintProviders(j);
+  const d=PROVIDERS[$('provider').value]||{};
+  $('pkeymsg').textContent = d.status==='ready'
+    ? 'Ready. Held in memory only — you will need it again next time you start the app.'
+    : (d.status||'Still not usable.');
+});
+fetch('/api/providers').then(r=>r.json()).then(paintProviders).catch(()=>{});
 $('run').addEventListener('click',async()=>{
   const body={urls:$('urls').value,ask:$('ask').value,shape:$('shape').value,
     profile:$('profile').value,asr:$('asr').value,provider:$('provider').value,
+    model:($('provider').value==='ollama'&&$('omodel').value)||null,
     lang:$('lang').value,output_language:$('outlang').value,
     limit:parseInt($('limit').value||'0',10),transcribe_only:$('tonly').checked};
   $('run').disabled=true; $('progress').classList.remove('hidden');
@@ -276,6 +346,40 @@ function render(recs){
   }).join('');
 }
 poll();
+
+/* ---- ask about a run -------------------------------------------------- */
+const HIST=[];
+fetch('/api/runs').then(r=>r.json()).then(rs=>{
+  const sel=$('chatrun');
+  rs.forEach(r=>{const o=document.createElement('option');o.value=r.dir;o.textContent=r.label;sel.appendChild(o);});
+  if(rs.length) sel.value=rs[0].dir;
+}).catch(()=>{});
+function bubble(text,cls){
+  const log=$('chatlog'); const empty=log.querySelector('.chat-empty'); if(empty) empty.remove();
+  const d=document.createElement('div'); d.className='msg '+cls; d.textContent=text;
+  log.appendChild(d); log.scrollTop=log.scrollHeight; return d;
+}
+$('chatform').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const msg=$('chatbox').value.trim(); if(!msg) return;
+  $('chatbox').value=''; $('chatsend').disabled=true;
+  bubble(msg,'you'); HIST.push({role:'user',content:msg});
+  const wait=bubble('Reading the run…','vke thinking');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:msg,history:HIST.slice(0,-1),run:$('chatrun').value,
+                           provider:$('provider').value,
+                           model:($('provider').value==='ollama'&&$('omodel').value)||null})});
+    const j=await r.json();
+    wait.remove();
+    if(!r.ok){bubble(j.error||'That did not work.','vke bad'); return;}
+    bubble(j.reply,'vke'); HIST.push({role:'assistant',content:j.reply});
+  }catch(err){ wait.remove(); bubble(String(err),'vke bad'); }
+  finally{ $('chatsend').disabled=false; $('chatbox').focus(); }
+});
+$('chatbox').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatform').requestSubmit();}
+});
 </script>
 </body>
 </html>
