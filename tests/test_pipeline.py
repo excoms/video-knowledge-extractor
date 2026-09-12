@@ -287,6 +287,12 @@ def test_no_function_uses_a_name_it_never_imports():
                 if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
         for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
             imported, assigned, used = set(), set(), set()
+            # Default values are evaluated where the function is DEFINED, not
+            # inside it — a closure like `def f(_x=x)` does not use `x` in its
+            # own scope.
+            defaults = set()
+            for d in list(fn.args.defaults) + [d for d in fn.args.kw_defaults if d]:
+                defaults |= {n.id for n in ast.walk(d) if isinstance(n, ast.Name)}
             for n in ast.walk(fn):
                 if isinstance(n, (ast.Import, ast.ImportFrom)):
                     imported |= {a.asname or a.name.split(".")[0] for a in n.names}
@@ -298,7 +304,8 @@ def test_no_function_uses_a_name_it_never_imports():
                     assigned.add(n.name)
                 elif isinstance(n, (ast.FunctionDef, ast.ClassDef)):
                     assigned.add(n.name)
-            missing = used - imported - assigned - top - set(dir(builtins))
+            missing = (used - imported - assigned - defaults - top
+                       - set(dir(builtins)))
             if missing:
                 problems.append(f"{path.name}:{fn.name} uses {sorted(missing)}")
     assert not problems, "unresolved names: " + "; ".join(problems)
@@ -333,6 +340,32 @@ def test_presets_are_usable_pairs_and_match_the_interface():
         ask = PRESETS[key_cli][0]
         assert json.dumps(ask)[1:60] in block.group(1), \
             f"page preset {key_js!r} does not match the CLI wording for {key_cli!r}"
+
+
+def test_no_function_shadows_a_module_it_imports():
+    """A local name that matches an imported module silently replaces it.
+
+    Regression: a progress callback named `report` shadowed the imported
+    `report` module, so the next call became 'function' object has no
+    attribute 'write_json' — at the very end of a long run.
+    """
+    import ast
+
+    src_dir = Path(__file__).resolve().parent.parent / "src" / "vke"
+    problems = []
+    for path in sorted(src_dir.rglob("*.py")):
+        tree = ast.parse(path.read_text("utf-8"))
+        for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            imported = {a.asname or a.name for n in ast.walk(fn)
+                        if isinstance(n, ast.ImportFrom) for a in n.names}
+            defined = {n.name for n in ast.walk(fn)
+                       if isinstance(n, (ast.FunctionDef, ast.ClassDef))
+                       and n is not fn}
+            clash = imported & defined
+            if clash:
+                problems.append(f"{path.name}:{fn.name} defines {sorted(clash)} "
+                                f"which it also imports")
+    assert not problems, "; ".join(problems)
 
 
 def test_transcript_char_rate():

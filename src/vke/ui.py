@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -105,9 +106,23 @@ def run_job(cfg: dict) -> None:
                 if caption_langs:
                     t = fetch_captions(ref, caption_langs, tmp, limits)
                 if t is None:
+                    started = time.monotonic()
+
+                    def on_transcribe_progress(fraction, _ref=ref, _t0=started):
+                        """Surface transcription progress on the page."""
+                        pct = int(fraction * 100)
+                        elapsed = time.monotonic() - _t0
+                        note = f"transcribing {pct}%"
+                        if fraction > 0.02:
+                            remaining = elapsed / fraction - elapsed
+                            note += f" · about {remaining / 60:.0f} min left"
+                        _video(_ref.video_id, state="running",
+                               progress=pct, note=note)
+
                     t = transcribe(ref, backend=asr_backend,
                                    language=cfg.get("lang") or None,
-                                   tmp_dir=tmp, limits=limits)
+                                   tmp_dir=tmp, limits=limits,
+                                   on_progress=on_transcribe_progress)
                 store.put_transcript(ref.video_id, t.header(), t.text, t.segments)
                 store.mark(ref.video_id, status="ok", title=t.title, duration=t.duration,
                            chars=len(t.text), source=t.source, language=t.language)
@@ -165,7 +180,8 @@ def run_job(cfg: dict) -> None:
                            st.get("language", ""), st.get("source", ""),
                            st.get("duration", 0),
                                 segments=store.get_segments(ref.video_id))
-            _video(ref.video_id, state="analysing", note="reading")
+            _video(ref.video_id, state="analysing", progress=0,
+                   note=f"analysing ({i} of {len(ready)})")
             got = analyse(provider, t, plan, ask,
                           cfg.get("output_language") or "English", profile_text,
                           cfg.get("instructions", ""), speakers=roster)

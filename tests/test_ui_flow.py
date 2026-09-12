@@ -49,9 +49,14 @@ def _run(tmp: Path, cfg_extra=None, calls=None):
     transcript = Transcript("vid1", "تجرباتی ویڈیو", ref.url, SAMPLE, "ur",
                             "asr:stub", 60.0, segs)
 
+    import vke.limits as limits_mod
+    import vke.providers as prov_mod
     import vke.sources as sources_mod
     import vke.transcripts as tr_mod
-    import vke.providers as prov_mod
+
+    # A test must not pass or fail on how full this machine's disk is.
+    real_free = limits_mod.Limits.free_disk
+    limits_mod.Limits.free_disk = staticmethod(lambda: 10 * 1024 ** 3)
 
     saved = (sources_mod.resolve_many, tr_mod.transcribe, prov_mod.get_provider,
              prov_mod.autodetect)
@@ -76,6 +81,7 @@ def _run(tmp: Path, cfg_extra=None, calls=None):
     finally:
         (sources_mod.resolve_many, tr_mod.transcribe,
          prov_mod.get_provider, prov_mod.autodetect) = saved
+        limits_mod.Limits.free_disk = real_free
     return dict(ui.JOB)
 
 

@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import io
 import platform
+import re
 from pathlib import Path
 
 from ..normalise import clean_text
@@ -93,6 +95,41 @@ def _diagnosis(headline: str) -> str:
     return "\n".join(lines)
 
 
+class _ProgressTap(io.TextIOBase):
+    """Reads the progress bar the transcriber prints, and reports the fraction.
+
+    Whisper writes a tqdm bar to stderr. Left alone it lands in whichever
+    terminal happens to be running the server, which is no use to someone
+    watching the web page — so it is intercepted, parsed, and forwarded.
+    """
+
+    PERCENT = re.compile(r"(\d{1,3})%\|")
+
+    def __init__(self, on_progress, passthrough=None):
+        self.on_progress = on_progress
+        self.passthrough = passthrough
+        self._last = -1
+
+    def write(self, text: str) -> int:
+        if self.passthrough is not None:
+            self.passthrough.write(text)
+        m = None
+        for m in self.PERCENT.finditer(text):
+            pass                       # keep the last match in the chunk
+        if m:
+            pct = min(int(m.group(1)), 100)
+            if pct != self._last:
+                self._last = pct
+                with contextlib.suppress(Exception):
+                    self.on_progress(pct / 100.0)
+        return len(text)
+
+    def flush(self) -> None:
+        if self.passthrough is not None:
+            with contextlib.suppress(Exception):
+                self.passthrough.flush()
+
+
 def _download_audio(ref, tmp_dir: Path, limits=None) -> tuple[Path, dict]:
     """16 kHz mono wav — what Whisper wants, and the smallest thing that works."""
     import yt_dlp
@@ -112,7 +149,8 @@ def _download_audio(ref, tmp_dir: Path, limits=None) -> tuple[Path, dict]:
     return tmp_dir / f"{ref.video_id}.wav", (info or {})
 
 
-def _run_faster_whisper(wav: Path, model_name: str, language: str | None):
+def _run_faster_whisper(wav: Path, model_name: str, language: str | None,
+                        on_progress=None):
     try:
         from faster_whisper import WhisperModel
     except ImportError as e:
@@ -121,11 +159,19 @@ def _run_faster_whisper(wav: Path, model_name: str, language: str | None):
         ) from e
     model = WhisperModel(model_name, device="auto", compute_type="int8")
     segs, info = model.transcribe(str(wav), language=language, vad_filter=True)
-    out = [(s.start, s.end, s.text.strip()) for s in segs]
+    total = getattr(info, "duration", 0) or 0
+    out = []
+    for seg in segs:                       # a generator — position is known
+        out.append((seg.start, seg.end, seg.text.strip()))
+        if on_progress and total:
+            with contextlib.suppress(Exception):
+                on_progress(min(seg.end / total, 1.0))
     return out, getattr(info, "language", language or "unknown")
 
 
-def _run_mlx(wav: Path, model_name: str, language: str | None):
+def _run_mlx(wav: Path, model_name: str, language: str | None, on_progress=None):
+    import sys
+
     try:
         import mlx_whisper
     except ImportError as e:
@@ -133,8 +179,14 @@ def _run_mlx(wav: Path, model_name: str, language: str | None):
             "mlx-whisper is not installed (Apple Silicon only). "
             "Run: pip install 'video-knowledge-extractor[mlx]'"
         ) from e
-    r = mlx_whisper.transcribe(str(wav), path_or_hf_repo=model_name,
-                               language=language, verbose=False)
+    if on_progress:
+        tap = _ProgressTap(on_progress, passthrough=sys.stderr)
+        with contextlib.redirect_stderr(tap):
+            r = mlx_whisper.transcribe(str(wav), path_or_hf_repo=model_name,
+                                       language=language, verbose=False)
+    else:
+        r = mlx_whisper.transcribe(str(wav), path_or_hf_repo=model_name,
+                                   language=language, verbose=False)
     out = [(s.get("start", 0.0), s.get("end", 0.0), s.get("text", "").strip())
            for s in r.get("segments", [])]
     return out, r.get("language", language or "unknown")
@@ -142,7 +194,7 @@ def _run_mlx(wav: Path, model_name: str, language: str | None):
 
 def transcribe(ref, backend: str = "auto", model: str | None = None,
                language: str | None = None, tmp_dir: Path | None = None,
-               limits=None):
+               limits=None, on_progress=None):
     """Download audio, transcribe it, delete the audio. Always.
 
     The backend is resolved here as well as at the entry points: a guard that
@@ -163,7 +215,7 @@ def transcribe(ref, backend: str = "auto", model: str | None = None,
         if limits is not None:
             limits.check_resources("transcription")
         runner = _run_mlx if backend == "mlx" else _run_faster_whisper
-        raw, detected = runner(wav, model, language)
+        raw, detected = runner(wav, model, language, on_progress)
     finally:
         # A killed process skips this; the caller sweeps orphans on the next run.
         with contextlib.suppress(Exception):
