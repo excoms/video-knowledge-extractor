@@ -205,9 +205,18 @@ def run_job(cfg: dict) -> None:
             _set(message="Grouping, scoring and profiling")
             meta["source_name"] = (ready[0].title if len(ready) == 1
                                    else ", ".join(urls))
-            reg = corpus_mod.build_register(provider, records, ask,
-                                            cfg.get("output_language") or "English",
-                                            speakers=roster)
+            try:
+                reg = corpus_mod.build_register(provider, records, ask,
+                                                cfg.get("output_language") or "English",
+                                                speakers=roster)
+            except corpus_mod.SynthesisFailed as e:
+                (outdir / "REPORT-NOT-WRITTEN.txt").write_text(
+                    f"The report was not written.\n\n{e}\n\nThe {len(records)} "
+                    f"records are intact in analysis.json. To retry just this "
+                    f"pass:\n\n    vke report {outdir}\n", encoding="utf-8")
+                _set(state="error", error=str(e)[:400],
+                     message=f"{len(records)} records saved, but the report failed")
+                return
             if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
                 report.write_docx(outdir / "debrief.md")
 

@@ -18,6 +18,16 @@ from .providers.base import extract_json
 # Below this there is nothing to synthesise — the records speak for themselves.
 MIN_RECORDS = 4
 
+
+class SynthesisFailed(RuntimeError):
+    """The grouping, scoring and profiling pass could not be produced.
+
+    Raised rather than swallowed. This pass is the report — the per-record
+    file is working-out. A run that loses it and still says "done" looks
+    identical to a run that had nothing to say, and the records that cost
+    an hour of transcription sit there with no explanation attached.
+    """
+
 SYNTHESIS_SYSTEM = """You are given every record extracted from one or more
 videos, and the roster of who was speaking.
 
@@ -130,10 +140,25 @@ def build_register(provider, records: list[dict], request: str,
               f"{len({r['video_id'] for r in records})} video(s)):\n{payload}\n\n"
               f"Return the JSON object.")
     try:
-        out = extract_json(provider.complete(SYNTHESIS_SYSTEM, user, max_tokens=12000))
-    except Exception:
-        return {}
-    return out if isinstance(out, dict) else {}
+        raw = provider.complete(SYNTHESIS_SYSTEM, user, max_tokens=12000)
+    except Exception as e:
+        raise SynthesisFailed(
+            f"{provider.name} could not complete the grouping and scoring pass "
+            f"over {len(records)} records ({len(user):,} characters of prompt — "
+            f"this pass sends every record in one call, so it is far larger than "
+            f"the per-chunk calls that already succeeded). {e}") from e
+    try:
+        out = extract_json(raw)
+    except Exception as e:
+        raise SynthesisFailed(
+            f"{provider.name} returned {len(raw):,} characters that were not "
+            f"usable JSON. A truncated reply usually means the report outgrew "
+            f"the reply limit. {e}") from e
+    if not isinstance(out, dict) or not out:
+        raise SynthesisFailed(
+            f"{provider.name} returned {type(out).__name__} rather than the "
+            f"report object, from {len(raw):,} characters of reply.")
+    return out
 
 
 def _bar(score, out_of=10) -> str:

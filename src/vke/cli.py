@@ -82,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--host", default="127.0.0.1")
     u.add_argument("--no-browser", action="store_true")
 
+    g = sub.add_parser("report",
+                       help="rebuild the report from a finished run's records")
+    g.add_argument("rundir", help="a folder under vke-data/runs/")
+    g.add_argument("--provider", default="auto")
+    g.add_argument("--model", default=None)
+    g.add_argument("--output-language", default="English")
+
     sub.add_parser("profiles", help="list available expertise profiles")
     sub.add_parser("providers", help="show which analysis backends are usable here")
     return p
@@ -134,6 +141,62 @@ def cmd_providers() -> int:
         print(f"\n  Would use: {pick_backend('auto')}\n")
     except Exception as e:
         print(f"\n  None usable: {str(e).splitlines()[0]}\n")
+    return 0
+
+
+def cmd_report(a) -> int:
+    """Redo only the grouping, scoring and profiling pass.
+
+    Transcription is the expensive step and it is already done; when the
+    report is the part that failed, nothing about the audio needs touching
+    again. Reads the records the run already wrote.
+    """
+    import json
+
+    from . import corpus as corpus_mod
+    from . import report
+    from .providers import autodetect, get_provider
+
+    outdir = Path(a.rundir)
+    src = outdir / "analysis.json"
+    if not src.exists():
+        print(f"\n  No records at {src}.\n"
+              f"  `vke report` rebuilds a report from a run that already ran;\n"
+              f"  it does not transcribe. Use `vke run` for a new one.\n",
+              file=sys.stderr)
+        return 2
+
+    data = json.loads(src.read_text("utf-8"))
+    records = data.get("records") or []
+    meta = dict(data.get("meta") or {})
+    manifest = {}
+    if (outdir / "run.json").exists():
+        manifest = json.loads((outdir / "run.json").read_text("utf-8"))
+    ask = manifest.get("request") or meta.get("request", "")
+    if len(records) < corpus_mod.MIN_RECORDS:
+        print(f"\n  Only {len(records)} records — too few to group.\n",
+              file=sys.stderr)
+        return 2
+
+    provider = get_provider(a.provider if a.provider != "auto" else autodetect(),
+                            a.model)
+    print(f"\n  {len(records)} records · {provider.name}")
+    print("  Grouping, scoring and profiling ...", flush=True)
+    meta.setdefault("source_name", manifest.get("sources", [outdir.name])[0]
+                    if manifest.get("sources") else outdir.name)
+    meta.setdefault("source", ", ".join(manifest.get("sources", [])))
+    meta.setdefault("record_count", len(records))
+    try:
+        reg = corpus_mod.build_register(provider, records, ask, a.output_language)
+    except corpus_mod.SynthesisFailed as e:
+        _strand(outdir, e, len(records))
+        return 1
+    if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
+        print(f"  Report -> {outdir / 'debrief.md'}")
+        doc = report.write_docx(outdir / "debrief.md")
+        if doc:
+            print(f"  Word version -> {doc}")
+        (outdir / "REPORT-NOT-WRITTEN.txt").unlink(missing_ok=True)
     return 0
 
 
@@ -306,8 +369,12 @@ def cmd_run(a) -> int:
     if not a.no_corpus and len(records) >= corpus_mod.MIN_RECORDS:
         print("  Grouping, scoring and profiling ...", flush=True)
         meta["source_name"] = ready[0].title if len(ready) == 1 else ", ".join(a.urls)
-        reg = corpus_mod.build_register(provider, records, ask,
-                                        a.output_language, speakers=roster)
+        try:
+            reg = corpus_mod.build_register(provider, records, ask,
+                                            a.output_language, speakers=roster)
+        except corpus_mod.SynthesisFailed as e:
+            _strand(outdir, e, len(records))
+            return 0
         if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
             print(f"  Debrief -> {outdir / 'debrief.md'}")
             doc = report.write_docx(outdir / "debrief.md")
@@ -317,6 +384,21 @@ def cmd_run(a) -> int:
     return 0
 
 
+def _strand(outdir, err, n_records: int) -> None:
+    """Say, loudly and on disk, that the report is missing and why.
+
+    The records are the expensive part — hours of transcription — and they
+    survive. Losing only the last pass should read as a retryable step, not
+    as a finished run that happened to be quiet.
+    """
+    note = (f"The report was not written.\n\n{err}\n\n"
+            f"The {n_records} records are intact in analysis.json. To retry "
+            f"just this pass, without transcribing anything again:\n\n"
+            f"    vke report {outdir}\n")
+    (outdir / "REPORT-NOT-WRITTEN.txt").write_text(note, encoding="utf-8")
+    print("\n  " + note.replace("\n", "\n  "))
+
+
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -324,6 +406,8 @@ def main(argv=None) -> int:
             return cmd_providers()
         if args.command == "ui":
             return cmd_ui(args)
+        if args.command == "report":
+            return cmd_report(args)
         if args.command == "profiles":
             for n in list_profiles():
                 print(f"  {n}")

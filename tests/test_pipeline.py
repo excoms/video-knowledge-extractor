@@ -401,6 +401,81 @@ def test_transcript_char_rate():
     assert t.char_rate == 8.0
 
 
+def test_a_failed_report_is_raised_not_swallowed():
+    """The grouping pass must never fail quietly.
+
+    Regression: `build_register` caught every exception and returned {},
+    so a provider error at the last step produced a run that wrote no
+    report, printed no reason and reported success. 61 records and 2h21m
+    of transcription sat in the folder with nothing to explain them.
+    """
+    from vke import corpus
+
+    class Broken:
+        name = "broken"
+
+        def complete(self, *a, **k):
+            raise RuntimeError("exited with status 1")
+
+    class Babbling:
+        name = "babbling"
+
+        def complete(self, *a, **k):
+            return "I'd be glad to help with that."
+
+    records = [{"video_id": "v", "video_title": "t", "record": {"claim": "c"}}
+               for _ in range(corpus.MIN_RECORDS)]
+
+    for provider, expect in ((Broken(), "status 1"), (Babbling(), "not usable JSON")):
+        try:
+            corpus.build_register(provider, records, "audit this")
+        except corpus.SynthesisFailed as e:
+            assert expect in str(e), f"{provider.name}: unhelpful message {e}"
+            assert provider.name in str(e), f"{provider.name}: does not say who failed"
+        else:
+            raise AssertionError(f"{provider.name} failure was swallowed")
+
+    assert corpus.build_register(Broken(), records[:1], "x") == {}, \
+        "too-few-records must stay a quiet no-op, not an error"
+
+
+def test_report_can_be_rebuilt_without_transcribing_again():
+    """`vke report <run>` must exist and must not need the audio.
+
+    Transcription is the hours-long step; when only the last pass fails,
+    the fix cannot be to run the whole thing again.
+    """
+    from vke.cli import build_parser
+
+    a = build_parser().parse_args(["report", "some/run/dir"])
+    assert a.command == "report" and a.rundir == "some/run/dir"
+    for unwanted in ("asr", "asr_model", "urls", "lang"):
+        assert not hasattr(a, unwanted), \
+            f"`vke report` takes {unwanted!r}, so it is not audio-free"
+
+
+def test_no_test_is_defined_below_the_runner():
+    """A test appended to the end of one of these files never runs.
+
+    The runner at the bottom walks globals() at the moment it executes, so
+    anything defined after it is invisible — it does not fail, it simply is
+    not there. Caught twice by noticing a new test missing from the output.
+    """
+    import ast
+
+    for path in sorted(Path(__file__).resolve().parent.glob("test_*.py")):
+        tree = ast.parse(path.read_text("utf-8"))
+        runner = [n.lineno for n in tree.body
+                  if isinstance(n, ast.If) and ast.unparse(n.test).startswith("__name__")]
+        if not runner:
+            continue
+        stranded = [n.name for n in tree.body
+                    if isinstance(n, ast.FunctionDef)
+                    and n.name.startswith("test_") and n.lineno > runner[0]]
+        assert not stranded, \
+            f"{path.name}: {stranded} are defined below the runner and never run"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
