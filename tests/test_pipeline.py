@@ -404,10 +404,15 @@ def test_transcript_char_rate():
 def test_a_failed_report_is_raised_not_swallowed():
     """The grouping pass must never fail quietly.
 
-    Regression: `build_register` caught every exception and returned {},
-    so a provider error at the last step produced a run that wrote no
-    report, printed no reason and reported success. 61 records and 2h21m
-    of transcription sat in the folder with nothing to explain them.
+    `build_register` caught every exception and returned {}, so a provider
+    error at the last step would produce a run that wrote no report, printed
+    no reason, and reported success.
+
+    Written after misdiagnosing a run as having failed this way when it had
+    not — the grouping pass was still going and finished six minutes later.
+    The swallow was real and worth removing; the incident that prompted it
+    was not an instance of it. Kept because the failure it prevents is
+    genuinely silent, and silence is what made the misreading possible.
     """
     from vke import corpus
 
