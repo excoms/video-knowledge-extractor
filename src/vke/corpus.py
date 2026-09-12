@@ -35,6 +35,11 @@ Produce a debrief. Return JSON only, with exactly these keys:
              "weakest_flank": "<where a well-informed opponent attacks first —
                                 the specific weak joint, not a disclaimer>",
              "better_framing": "<the same argument put at its strongest>",
+             "counter_response": "<the best reply the OTHER side can make to that
+                                   improved version — argued as well as the framing
+                                   itself, not a token objection. End by naming the
+                                   ground the responder should move the exchange to,
+                                   where their position is genuinely stronger.>",
              "how_it_fared": "unanswered" | "answered" | "conceded" | "contested",
              "note": "<what happened to it across the discussion>"}],
 
@@ -72,6 +77,11 @@ Produce a debrief. Return JSON only, with exactly these keys:
 Rules on scoring, which is the part most often done badly:
 - Judge the ARGUING, not the conclusion. A view you find mistaken, defended
   well, outscores one you share, defended badly.
+- counter_response must be a real reply, of the same quality as the framing it
+  answers. Steelman both sides: if the improved argument is genuinely hard to
+  answer, say where its weight actually lies and what the responder's best
+  available ground is instead. A weak counter is a failure of the analysis, not
+  a finding about the argument.
 - argument_quality: validity, and whether premises support conclusions.
 - evidence: specificity and accuracy of what is cited. Vague gestures at
   "science says" score low however confident the delivery.
@@ -220,6 +230,7 @@ def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
             for label, key in (("What is genuinely defensible", "defensible"),
                                ("Weakest flank", "weakest_flank"),
                                ("How it should have been put", "better_framing"),
+                               ("The reply that comes back", "counter_response"),
                                ("How it fared", "note")):
                 if t.get(key):
                     L.append(f"**{label}** — {t[key]}\n")

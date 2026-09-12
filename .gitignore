@@ -31,3 +31,7 @@ diagnosis.txt
 
 # run outputs, transcript cache and archived working material
 vke-data/
+
+# local helper, not part of the package
+Free up disk space.command
+Open Video Knowledge Extractor.command
