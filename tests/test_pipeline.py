@@ -337,9 +337,37 @@ def test_presets_are_usable_pairs_and_match_the_interface():
     assert block, "could not find PRESETS in the page"
     for key_cli, key_js in (("argument-audit", "audit"), ("timeline", "timeline"),
                             ("contradictions", "conflicts"), ("key-points", "points")):
-        ask = PRESETS[key_cli][0]
-        assert json.dumps(ask)[1:60] in block.group(1), \
-            f"page preset {key_js!r} does not match the CLI wording for {key_cli!r}"
+        for half, what in zip(PRESETS[key_cli], ("request", "output shape")):
+            assert json.dumps(half)[1:-1] in block.group(1), \
+                f"page preset {key_js!r} {what} has drifted from the CLI wording " \
+                f"for {key_cli!r} — the two must stay identical"
+
+
+def test_argument_defaults_ask_for_the_reply_that_comes_back():
+    """Every argumentative default must demand a counter to its own steelman.
+
+    Improving an argument without giving the best answer to the improved
+    version trains the reader to expect agreement. The requirement has to
+    live in all four places a run can pick it up from, or a run that skips
+    one of them silently loses it.
+    """
+    from vke.cli import PRESETS
+
+    src = Path(__file__).resolve().parent.parent / "src" / "vke"
+    ask, shape = PRESETS["argument-audit"]
+    surfaces = {
+        "preset request": ask,
+        "preset output shape": shape,
+        "page": (src / "static" / "index.html").read_text("utf-8"),
+        "corpus schema and rules": (src / "corpus.py").read_text("utf-8"),
+        "debate profile": (src / "profiles" / "debate.txt").read_text("utf-8"),
+    }
+    for where, body in surfaces.items():
+        low = body.lower()
+        assert "reply" in low or "counter" in low, \
+            f"{where} no longer asks for the reply that comes back"
+        assert "stronger" in low, \
+            f"{where} no longer asks where the responder is stronger"
 
 
 def test_no_function_shadows_a_module_it_imports():

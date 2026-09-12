@@ -52,6 +52,9 @@ You are not picking from a menu of features. You describe what you want.
 ```bash
 # Audit your own arguments before an opponent does
 vke run <url> --preset argument-audit
+#   scorecard, goalpost shifts, fallacies and speaker profiles — and for every
+#   argument, both the strongest way to put it and the best reply that comes
+#   back at that stronger version
 
 # A historical timeline, in English, from Urdu videos
 vke run <url> --lang ur --output-language English \
