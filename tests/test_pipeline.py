@@ -476,6 +476,40 @@ def test_no_test_is_defined_below_the_runner():
             f"{path.name}: {stranded} are defined below the runner and never run"
 
 
+def test_no_function_uses_an_import_before_it_makes_it():
+    """A function-local import binds the name for the WHOLE function.
+
+    Regression: `cmd_run` used `Transcript` at line 322 and imported it at
+    line 331. Python marks the name local from the first import statement
+    anywhere in the body, so the earlier use raised UnboundLocalError
+    instead of falling back to the module-level name. It survived three
+    commits because only the CLI path reaches that branch, and every run
+    in between went through the web interface.
+    """
+    import ast
+
+    src_dir = Path(__file__).resolve().parent.parent / "src" / "vke"
+    problems = []
+    for path in sorted(src_dir.rglob("*.py")):
+        tree = ast.parse(path.read_text("utf-8"))
+        for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+            bound: dict[str, int] = {}
+            for node in ast.walk(fn):
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        name = alias.asname or alias.name.split(".")[0]
+                        bound[name] = min(bound.get(name, node.lineno), node.lineno)
+            if not bound:
+                continue
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                        and node.id in bound and node.lineno < bound[node.id]):
+                    problems.append(
+                        f"{path.name}:{node.lineno} {fn.name}() uses {node.id!r} "
+                        f"before importing it on line {bound[node.id]}")
+    assert not problems, "use before a function-local import:\n  " + "\n  ".join(problems)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

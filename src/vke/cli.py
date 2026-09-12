@@ -312,6 +312,11 @@ def cmd_run(a) -> int:
 
     profile_text = _load_profile(a.profile)
 
+    # Imported here rather than below: a function-local import makes the name
+    # local for the WHOLE function, so a use above it raises UnboundLocalError
+    # rather than falling back to any outer binding.
+    from .transcripts import Transcript
+
     # One roster for the whole run. Chunks are analysed independently, so
     # without it the same person is named differently in each.
     roster: list[dict] = []
@@ -328,7 +333,6 @@ def cmd_run(a) -> int:
             roster = identify_speakers(provider, probe)
             if roster:
                 print("  Speakers: " + ", ".join(r["name"] for r in roster))
-    from .transcripts import Transcript
 
     records: list[dict] = []
     for i, ref in enumerate(ready, 1):
