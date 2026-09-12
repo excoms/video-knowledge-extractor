@@ -304,6 +304,37 @@ def test_no_function_uses_a_name_it_never_imports():
     assert not problems, "unresolved names: " + "; ".join(problems)
 
 
+def test_presets_are_usable_pairs_and_match_the_interface():
+    """Each preset must be (ask, shape), and the web interface must offer the
+    same wording as the CLI.
+
+    Regression: an edit left the argument-audit entry as a single concatenated
+    string — adjacent string literals with a missing comma — which unpacks
+    wrongly at runtime and silently sends the shape text as part of the request.
+    """
+    import json
+    import re
+
+    from vke.cli import PRESETS
+
+    for name, value in PRESETS.items():
+        assert isinstance(value, tuple) and len(value) == 2, \
+            f"{name} must be (ask, shape), got {type(value).__name__} of len " \
+            f"{len(value) if hasattr(value, '__len__') else '?'}"
+        ask, shape = value
+        assert ask.strip() and shape.strip(), f"{name} has an empty half"
+
+    page = (Path(__file__).resolve().parent.parent
+            / "src" / "vke" / "static" / "index.html").read_text("utf-8")
+    block = re.search(r"const PRESETS=\{(.+?)\};", page, re.S)
+    assert block, "could not find PRESETS in the page"
+    for key_cli, key_js in (("argument-audit", "audit"), ("timeline", "timeline"),
+                            ("contradictions", "conflicts"), ("key-points", "points")):
+        ask = PRESETS[key_cli][0]
+        assert json.dumps(ask)[1:60] in block.group(1), \
+            f"page preset {key_js!r} does not match the CLI wording for {key_cli!r}"
+
+
 def test_transcript_char_rate():
     t = Transcript("v", "t", "u", "x" * 800, "ur", "asr:test", 100.0)
     assert t.char_rate == 8.0

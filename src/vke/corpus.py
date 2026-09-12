@@ -29,7 +29,12 @@ Produce a debrief. Return JSON only, with exactly these keys:
  "themes": [{"theme": "<the recurring subject, named once>",
              "raised_by": "<speaker>",
              "times_made": <integer>,
-             "core_claim": "<the argument, stated once, at its strongest>",
+             "core_claim": "<the argument in one sentence>",
+             "defensible": "<what is genuinely strong here — be specific, name
+                             the real support it has, and do not inflate>",
+             "weakest_flank": "<where a well-informed opponent attacks first —
+                                the specific weak joint, not a disclaimer>",
+             "better_framing": "<the same argument put at its strongest>",
              "how_it_fared": "unanswered" | "answered" | "conceded" | "contested",
              "note": "<what happened to it across the discussion>"}],
 
@@ -81,6 +86,10 @@ Rules on scoring, which is the part most often done badly:
 Other rules:
 - GROUP repetition. A point made six times is one theme with times_made 6, not
   six entries. This is the main reason this pass exists.
+- Grouping must not lose detail. Each grouped argument still gets the full
+  treatment — defensible, weakest flank, better framing. Collapsing six
+  mentions into one line summary throws away the analysis that made the
+  extraction worth doing.
 - Use only the names on the roster.
 - Return [] honestly for any section with nothing in it. Do not manufacture a
   fallacy to fill space — a clean argument is a finding.
@@ -200,14 +209,20 @@ def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
         L.append("## Arguments, grouped\n")
         L.append("Points made repeatedly are collapsed into one entry, with a "
                  "count.\n")
-        for t in sorted(reg["themes"], key=lambda x: -(x.get("times_made") or 0)):
+        for n, t in enumerate(sorted(reg["themes"],
+                                     key=lambda x: -(x.get("times_made") or 0)), 1):
             times = t.get("times_made") or 1
-            L.append(f"### {t.get('theme','?')}")
-            L.append(f"*{t.get('raised_by','?')} · made {times}×"
+            L.append(f"### {n}. {t.get('theme','?')}")
+            L.append(f"*{t.get('raised_by','?')} · pressed {times}×"
                      f" · {t.get('how_it_fared','?')}*\n")
-            L.append(f"{t.get('core_claim','')}\n")
-            if t.get("note"):
-                L.append(f"{t['note']}\n")
+            if t.get("core_claim"):
+                L.append(f"**The claim** — {t['core_claim']}\n")
+            for label, key in (("What is genuinely defensible", "defensible"),
+                               ("Weakest flank", "weakest_flank"),
+                               ("How it should have been put", "better_framing"),
+                               ("How it fared", "note")):
+                if t.get(key):
+                    L.append(f"**{label}** — {t[key]}\n")
 
     if reg.get("profiles"):
         L.append("## Speaker profiles\n")
