@@ -285,8 +285,38 @@ def test_no_function_uses_a_name_it_never_imports():
         top |= {"__file__", "__name__", "__doc__"}
         top |= {a.asname or a.name.split(".")[0] for n in tree.body
                 if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+        def bound_names(fn):
+            """Everything a function binds in its own scope."""
+            out = set()
+            for n in ast.walk(fn):
+                if isinstance(n, (ast.Import, ast.ImportFrom)):
+                    out |= {a.asname or a.name.split(".")[0] for a in n.names}
+                elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+                    out.add(n.id)
+                elif isinstance(n, ast.arg):
+                    out.add(n.arg)
+                elif isinstance(n, ast.ExceptHandler) and n.name:
+                    out.add(n.name)
+                elif isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+                    out.add(n.name)
+            return out
+
+        # A nested function reads its enclosing function's locals. Without the
+        # enclosing scope, every closure looks like a NameError — which is what
+        # this test reported for the chart helpers when they were added.
+        enclosing = {}
+        stack = [(n, set()) for n in tree.body if isinstance(n, ast.FunctionDef)]
+        while stack:
+            fn, outer = stack.pop()
+            enclosing[id(fn)] = outer
+            mine = outer | bound_names(fn)
+            for child in ast.walk(fn):
+                if isinstance(child, ast.FunctionDef) and child is not fn:
+                    stack.append((child, mine))
+
         for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
             imported, assigned, used = set(), set(), set()
+            assigned |= enclosing.get(id(fn), set())
             # Default values are evaluated where the function is DEFINED, not
             # inside it — a closure like `def f(_x=x)` does not use `x` in its
             # own scope.
@@ -513,6 +543,88 @@ def test_no_function_uses_an_import_before_it_makes_it():
                         f"{path.name}:{node.lineno} {fn.name}() uses {node.id!r} "
                         f"before importing it on line {bound[node.id]}")
     assert not problems, "use before a function-local import:\n  " + "\n  ".join(problems)
+
+
+def test_scoring_rewards_the_speaker_not_the_last_word():
+    """A dodge counts FOR the person who was dodged, not against them.
+
+    `outcome` describes what happened to that speaker's argument. "dodged"
+    means the opponent would not engage it, which is a point won, not lost.
+    Getting this backwards would inflip every chart.
+    """
+    from vke import scoring
+
+    def rec(speaker, **fields):
+        return {"speaker": speaker, "timestamp": [10, 20], "record": fields}
+
+    long = "x" * 60
+    evts = scoring.events([
+        rec("A", outcome="dodged", defensible_ground=long),
+        rec("B", outcome="contested", defensible_ground=long,
+            fallacy={"name": "Straw man", "severity": "high"}),
+    ])
+    by = {}
+    for e in evts:
+        by[e["speaker"]] = by.get(e["speaker"], 0) + e["points"]
+    assert by["A"] == 3, f"dodged + substance should be +3, got {by['A']}"
+    assert by["B"] == -2, f"substance + major fallacy should be -2, got {by['B']}"
+
+    series = scoring.running(evts, ["A", "B"])
+    assert series["A"][0] == (0.0, 0), "every line must start at zero"
+    assert series["A"][-1][1] == 3 and series["B"][-1][1] == -2
+
+
+def test_a_fallacy_costs_more_when_it_is_worse():
+    from vke import scoring
+
+    def one(sev):
+        e = scoring.events([{"speaker": "A", "timestamp": [0, 1],
+                             "record": {"fallacy": {"name": "f", "severity": sev}}}])
+        return e[0]["points"]
+
+    assert one("major") < one("moderate") < one("minor") < 0, \
+        "severity must be ordered, and every fallacy must cost something"
+    # Free text is the other shape this field arrives in.
+    e = scoring.events([{"speaker": "A", "timestamp": [0, 1],
+                         "record": {"fallacies_and_errors": "Hasty generalisation"}}])
+    assert e and e[0]["points"] < 0, "an unlabelled fallacy must still cost"
+
+
+def test_the_chart_is_a_real_png_with_no_dependencies():
+    """The chart must not drag matplotlib into a download sold on being small."""
+    import struct
+    import tempfile
+
+    from vke import chart, scoring
+
+    evts = scoring.events([
+        {"speaker": "A", "timestamp": [t * 60, t * 60 + 5],
+         "record": {"outcome": "unanswered", "defensible_ground": "y" * 60}}
+        for t in range(1, 6)])
+    series = scoring.running(evts, ["A"])
+    out = Path(tempfile.mkdtemp()) / "c.png"
+    chart.momentum(series, evts, out)
+
+    raw = out.read_bytes()
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
+    width, height = struct.unpack(">II", raw[16:24])
+    assert width > 200 and height > 100, f"implausible size {width}x{height}"
+
+    # Check what it IMPORTS, not what it mentions: the module explains in a
+    # comment why it does not use matplotlib, and a substring search on the
+    # source calls that a violation.
+    import ast
+
+    import vke.chart as m
+    tree = ast.parse(Path(m.__file__).read_text("utf-8"))
+    imported = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            imported |= {a.name.split(".")[0] for a in n.names}
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            imported.add(n.module.split(".")[0])
+    heavy = imported - {"struct", "zlib", "pathlib", "math", "__future__"}
+    assert not heavy, f"chart.py imports beyond the standard library: {sorted(heavy)}"
 
 
 if __name__ == "__main__":

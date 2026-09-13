@@ -199,8 +199,6 @@ def run_job(cfg: dict) -> None:
                            output_language=cfg.get("output_language"),
                            videos=len(ready), records=len(records))
         report.write_json(records, outdir / "analysis.json", meta)
-        report.write_markdown(records, outdir / "analysis.md", meta)
-        doc = report.write_docx(outdir / "analysis.md")
         if len(records) >= corpus_mod.MIN_RECORDS:
             _set(message="Grouping, scoring and profiling")
             meta["source_name"] = (ready[0].title if len(ready) == 1
@@ -217,7 +215,7 @@ def run_job(cfg: dict) -> None:
                 _set(state="error", error=str(e)[:400],
                      message=f"{len(records)} records saved, but the report failed")
                 return
-            if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
+            if corpus_mod.write_register(reg, outdir / "debrief.md", meta, records):
                 report.write_docx(outdir / "debrief.md")
 
         _set(state="done", message=f"{len(records)} records from {len(ready)} videos")

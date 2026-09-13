@@ -170,18 +170,108 @@ def _bar(score, out_of=10) -> str:
     return f"{n}/{out_of}"
 
 
-def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
+def _clock(seconds) -> str:
+    try:
+        s = int(float(seconds))
+    except (TypeError, ValueError):
+        return "?"
+    return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+
+
+def _caveats(records: list[dict], meta: dict) -> list[str]:
+    """State the limits before the scores, not in a footnote after them.
+
+    Every one of these is derived from the records rather than boilerplate,
+    so it says what is actually true of this run.
+    """
+    out = ["## Read this before the scores\n"]
+    out.append("**Speaker attribution is inferred, not heard.** The "
+               "transcription carries no speaker labels of any kind, so every "
+               "attribution below was worked out from context — who is being "
+               "addressed, who answers what. It is reliable where a speaker is "
+               "named or directly answered, and weakest in fast exchanges.\n")
+    out.append("**A counter-argument in this report is the analysis speaking, "
+               "not a participant.** Where it says what reply comes back, "
+               "nobody in the video said it.\n")
+
+    stamped = [r for r in records if r.get("timestamp")]
+    if stamped:
+        last = max(float(r["timestamp"][1]) for r in stamped)
+        duration = float(meta.get("duration") or 0)
+        if duration and last < duration * 0.9:
+            out.append(f"**Coverage stops at {_clock(last)} of "
+                       f"{_clock(duration)}.** Nothing here describes how the "
+                       f"discussion ended.\n")
+        estimated = sum(1 for r in records
+                        if r.get("timestamp_source") == "estimated")
+        if estimated:
+            out.append(f"**{estimated} of {len(records)} timestamps are "
+                       f"estimated** rather than matched against the audio.\n")
+    return out
+
+
+def _evidence(records: list[dict]) -> list[str]:
+    """Every extracted record, in the order it was said.
+
+    This replaces the separate per-record document. That file repeated the
+    same judgement the grouped section already makes, argument by argument;
+    what it held that nothing else did was the verbatim quote and the time it
+    was said. Only that survives here.
+    """
+    stamped = sorted(records, key=lambda r: float((r.get("timestamp") or [0])[0]))
+    out = ["## Evidence\n",
+           "Every extracted point in the order it was made, with the words it "
+           "came from. The analysis of each lives in the grouped section "
+           "above; this is the record it was drawn from.\n",
+           "| At | Speaker | Point | In their words |",
+           "|---|---|---|---|"]
+    for r in stamped:
+        rec = r.get("record") or {}
+        claim = str(rec.get("claim") or rec.get("claim_summary") or "").strip()
+        quote = str(r.get("quote_original") or "").replace("|", "\\|").strip()
+        mark = "~" if r.get("timestamp_source") == "estimated" else ""
+        out.append(f"| {mark}{_clock((r.get('timestamp') or [0])[0])} "
+                   f"| {r.get('speaker', '?')} "
+                   f"| {claim.replace('|', chr(92) + '|')[:190]} "
+                   f"| {quote[:170]} |")
+    out.append("\n`~` marks a time estimated from position in the transcript "
+               "rather than matched against the audio.\n")
+    return out
+
+
+def write_register(reg: dict, path: Path, meta: dict,
+                   records: list[dict] | None = None) -> Path | None:
+    """The single report for a run.
+
+    Section order follows what the reader actually needs: what the limits are,
+    who won, how it moved, then the arguments themselves. Fallacies come after
+    the arguments rather than before — put ninety lines of fallacy first and
+    the arguments, which are the point, are buried.
+    """
     if not reg:
         return None
-    L: list[str] = [f"# Debrief — {meta.get('source_name', 'analysis')}\n"]
+    records = records or []
+    n = 0
+
+    def head(title: str) -> str:
+        nonlocal n
+        n += 1
+        return f"## {n}. {title}\n"
+
+    L: list[str] = [f"# {meta.get('source_name', 'Argument audit')}\n"]
     L.append(f"**Source:** {meta.get('source', '')}  ")
     L.append(f"**Videos:** {meta.get('video_count', 0)} · "
              f"**Records analysed:** {meta.get('record_count', 0)}\n")
     if reg.get("summary"):
         L.append(reg["summary"] + "\n")
+    L.append("---\n")
+
+    if records:
+        L += _caveats(records, meta)
+        L.append("---\n")
 
     if reg.get("scorecard"):
-        L.append("## Scorecard\n")
+        L.append(head("Scorecard"))
         L.append("Judged on how the case was argued, not on whether the "
                  "conclusion is correct. 5 is competent; 8 or above needs "
                  "justifying.\n")
@@ -198,12 +288,28 @@ def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
                 L.append(f"- **{s.get('speaker','?')}** — {s['one_line_verdict']}")
         L.append("")
 
+    chart_rel = _write_chart(records, path)
+    if chart_rel:
+        L.append(head("How the score moved"))
+        L.append(f"![Score over time]({chart_rel})\n")
+        L.append("The line is each speaker's running total. The bars behind it "
+                 "are the individual moments that moved it — upward for a point "
+                 "won, downward for a fallacy or a shifted goalpost — so a bad "
+                 "ten minutes shows as a cluster rather than having to be "
+                 "inferred from a slope.\n")
+        L.append("This is derived from the extracted records by fixed rules, "
+                 "not by judgement, so you can disagree with the weights:\n")
+        from .scoring import rules_table
+        L.append(rules_table() + "\n")
+
     if reg.get("overall"):
-        L.append("## Verdict\n")
+        L.append(head("Verdict"))
         L.append(reg["overall"] + "\n")
 
     if reg.get("goalpost_shifts"):
-        L.append("## Moving the goalposts\n")
+        L.append(head("How it broke down"))
+        L.append("Points where a speaker changed the standard of proof or the "
+                 "definition of a key term after it had been met.\n")
         for g in reg["goalpost_shifts"]:
             L.append(f"### {g.get('speaker','?')}")
             L.append(f"- **First standard:** {g.get('original_standard','')}")
@@ -212,42 +318,14 @@ def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
                 L.append(f"- **Why it matters:** {g['why_it_matters']}")
             L.append("")
 
-    if reg.get("fallacies"):
-        L.append("## Fallacies\n")
-        order = {"high": 0, "medium": 1, "low": 2}
-        for f in sorted(reg["fallacies"], key=lambda x: order.get(x.get("severity"), 3)):
-            L.append(f"### {f.get('fallacy','?')} — {f.get('speaker','?')}")
-            L.append(f"*severity: {f.get('severity','?')}*\n")
-            L.append(f"{f.get('what_happened','')}\n")
-            if f.get("quote"):
-                L.append(f"> {f['quote']}\n")
-
-    if reg.get("unanswered"):
-        L.append("## Questions never answered\n")
-        L.append("In a scored debate an unanswered question costs more than a "
-                 "poor answer.\n")
-        for u in reg["unanswered"]:
-            L.append(f"- **{u.get('put_by','?')} → {u.get('put_to','?')}:** "
-                     f"{u.get('question','')}")
-            if u.get("note"):
-                L.append(f"  - {u['note']}")
-        L.append("")
-
-    if reg.get("concessions"):
-        L.append("## Concessions\n")
-        for c in reg["concessions"]:
-            L.append(f"- **{c.get('speaker','?')}** conceded {c.get('conceded','')}"
-                     + (f" to {c['to_whom']}" if c.get("to_whom") else ""))
-        L.append("")
-
     if reg.get("themes"):
-        L.append("## Arguments, grouped\n")
+        L.append(head("The arguments, grouped"))
         L.append("Points made repeatedly are collapsed into one entry, with a "
                  "count.\n")
-        for n, t in enumerate(sorted(reg["themes"],
+        for i, t in enumerate(sorted(reg["themes"],
                                      key=lambda x: -(x.get("times_made") or 0)), 1):
             times = t.get("times_made") or 1
-            L.append(f"### {n}. {t.get('theme','?')}")
+            L.append(f"### {i}. {t.get('theme','?')}")
             L.append(f"*{t.get('raised_by','?')} · pressed {times}×"
                      f" · {t.get('how_it_fared','?')}*\n")
             if t.get("core_claim"):
@@ -260,8 +338,38 @@ def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
                 if t.get(key):
                     L.append(f"**{label}** — {t[key]}\n")
 
+    if reg.get("fallacies"):
+        L.append(head("Fallacies"))
+        order = {"high": 0, "medium": 1, "low": 2}
+        for f in sorted(reg["fallacies"], key=lambda x: order.get(x.get("severity"), 3)):
+            L.append(f"### {f.get('fallacy','?')} — {f.get('speaker','?')}")
+            L.append(f"*severity: {f.get('severity','?')}*\n")
+            L.append(f"{f.get('what_happened','')}\n")
+            if f.get("quote"):
+                L.append(f"> {f['quote']}\n")
+
+    if reg.get("unanswered") or reg.get("concessions"):
+        L.append(head("Questions never answered, and concessions"))
+        if reg.get("unanswered"):
+            L.append("### Never answered\n")
+            L.append("In a scored debate an unanswered question costs more "
+                     "than a poor answer.\n")
+            for u in reg["unanswered"]:
+                L.append(f"- **{u.get('put_by','?')} → {u.get('put_to','?')}:** "
+                         f"{u.get('question','')}")
+                if u.get("note"):
+                    L.append(f"  - {u['note']}")
+            L.append("")
+        if reg.get("concessions"):
+            L.append("### Conceded\n")
+            for c in reg["concessions"]:
+                L.append(f"- **{c.get('speaker','?')}** conceded "
+                         f"{c.get('conceded','')}"
+                         + (f" to {c['to_whom']}" if c.get("to_whom") else ""))
+            L.append("")
+
     if reg.get("profiles"):
-        L.append("## Speaker profiles\n")
+        L.append(head("Speaker profiles"))
         for pr in reg["profiles"]:
             L.append(f"### {pr.get('speaker','?')}\n")
             if pr.get("style"):
@@ -278,5 +386,37 @@ def write_register(reg: dict, path: Path, meta: dict) -> Path | None:
             if pr.get("advice"):
                 L.append(f"**The one change that would help most** — {pr['advice']}\n")
 
+    if records:
+        L.append(head("Evidence"))
+        L += _evidence(records)[1:]
+
+    # Keep the structured result beside the prose. Re-rendering after a layout
+    # change is then free; without it, changing a heading costs another pass
+    # over every record and a fresh model call.
+    try:
+        path.with_suffix(".json").write_text(
+            json.dumps(reg, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
     path.write_text("\n".join(L), encoding="utf-8")
     return path
+
+
+def _write_chart(records: list[dict], report_path: Path) -> str | None:
+    """Render the momentum chart beside the report. None if it cannot be drawn."""
+    if not records:
+        return None
+    try:
+        from . import scoring
+        from .chart import momentum
+        evts = scoring.events(records)
+        speakers = list(dict.fromkeys(e["speaker"] for e in evts))
+        if len(speakers) < 1 or not evts:
+            return None
+        name = f"{report_path.stem}-score.png"
+        momentum(scoring.running(evts, speakers), evts, report_path.parent / name)
+        return name
+    except Exception:
+        # A missing chart must never cost the reader the report.
+        return None

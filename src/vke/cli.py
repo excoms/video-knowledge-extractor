@@ -88,6 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--provider", default="auto")
     g.add_argument("--model", default=None)
     g.add_argument("--output-language", default="English")
+    g.add_argument("--rebuild", action="store_true",
+                   help="redo the analysis instead of re-rendering a saved one")
 
     sub.add_parser("profiles", help="list available expertise profiles")
     sub.add_parser("providers", help="show which analysis backends are usable here")
@@ -178,6 +180,21 @@ def cmd_report(a) -> int:
               file=sys.stderr)
         return 2
 
+    saved = outdir / "debrief.json"
+    if saved.exists() and not a.rebuild:
+        print(f"\n  Re-rendering from {saved.name} — no model call needed.")
+        print("  Use --rebuild to run the analysis again.")
+        reg = json.loads(saved.read_text("utf-8"))
+        meta.setdefault("source_name", outdir.name)
+        meta.setdefault("source", ", ".join(manifest.get("sources", [])))
+        meta.setdefault("record_count", len(records))
+        if corpus_mod.write_register(reg, outdir / "debrief.md", meta, records):
+            print(f"  Report -> {outdir / 'debrief.md'}")
+            doc = report.write_docx(outdir / "debrief.md")
+            if doc:
+                print(f"  Word version -> {doc}")
+        return 0
+
     provider = get_provider(a.provider if a.provider != "auto" else autodetect(),
                             a.model)
     print(f"\n  {len(records)} records · {provider.name}")
@@ -191,7 +208,7 @@ def cmd_report(a) -> int:
     except corpus_mod.SynthesisFailed as e:
         _strand(outdir, e, len(records))
         return 1
-    if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
+    if corpus_mod.write_register(reg, outdir / "debrief.md", meta, records):
         print(f"  Report -> {outdir / 'debrief.md'}")
         doc = report.write_docx(outdir / "debrief.md")
         if doc:
@@ -363,12 +380,11 @@ def cmd_run(a) -> int:
                        provider=provider_name, asr=asr_backend,
                        output_language=a.output_language,
                        videos=len(ready), records=len(records))
+    # The records are kept as data, not as a second document. Their per-record
+    # prose duplicated the grouped section of the report; what only they held —
+    # the verbatim quote and the time — now appears there as evidence.
     report.write_json(records, outdir / "analysis.json", meta)
-    report.write_markdown(records, outdir / "analysis.md", meta)
-    print(f"\n  {len(records)} records -> {outdir / 'analysis.md'}")
-    doc = report.write_docx(outdir / "analysis.md")
-    if doc:
-        print(f"  Word version -> {doc}")
+    print(f"\n  {len(records)} records -> {outdir / 'analysis.json'}")
 
     if not a.no_corpus and len(records) >= corpus_mod.MIN_RECORDS:
         print("  Grouping, scoring and profiling ...", flush=True)
@@ -379,7 +395,7 @@ def cmd_run(a) -> int:
         except corpus_mod.SynthesisFailed as e:
             _strand(outdir, e, len(records))
             return 0
-        if corpus_mod.write_register(reg, outdir / "debrief.md", meta):
+        if corpus_mod.write_register(reg, outdir / "debrief.md", meta, records):
             print(f"  Debrief -> {outdir / 'debrief.md'}")
             doc = report.write_docx(outdir / "debrief.md")
             if doc:

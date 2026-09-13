@@ -99,9 +99,13 @@ def test_full_run_reaches_done_and_writes_every_output(tmp_path=None):
         assert key in r, f"record missing {key}"
     assert set(r["record"]) == {"claim", "vulnerability"}
 
-    for name in ("analysis.json", "analysis.md"):
-        f = tmp / name
-        assert f.exists() and f.stat().st_size > 0, f"{name} not written"
+    # Records are kept as data only. There is one document per run: the
+    # per-record prose that used to sit in analysis.md duplicated the grouped
+    # section of the report.
+    f = tmp / "analysis.json"
+    assert f.exists() and f.stat().st_size > 0, "analysis.json not written"
+    assert not (tmp / "analysis.md").exists(), \
+        "analysis.md is back - a run should write one document, not two"
     assert (tmp / "transcripts" / "vid1.txt").exists(), "transcript not saved"
 
     data = json.loads((tmp / "analysis.json").read_text())
@@ -115,7 +119,8 @@ def test_transcribe_only_stops_before_analysis(tmp_path=None):
     assert job["state"] == "done" and job["error"] == ""
     assert not job["records"], "should not analyse when transcribe_only is set"
     assert (tmp / "transcripts" / "vid1.txt").exists()
-    assert not (tmp / "analysis.md").exists()
+    assert not (tmp / "analysis.json").exists(), \
+        "transcribe-only must not produce any analysis output"
 
 
 def test_a_second_run_does_not_transcribe_again(tmp_path=None):
