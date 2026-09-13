@@ -208,13 +208,22 @@ def momentum(series: dict, events: list[dict], path: Path,
     # Zero is the line that matters; make it read differently from the grid.
     c.dashed(L, L + plot_w, zero, MUTED, on=5, off=4)
 
-    # Layer one: the individual events.
+    # Layer one: the individual events, coloured by WHOSE they are.
+    #
+    # These were first drawn green for good and red for bad, which looked
+    # sensible and answered the wrong question: a reader could see that a
+    # fallacy happened but not who committed it. Direction already carries
+    # the sign — up is a point won, down is a fallacy or a shifted goalpost —
+    # so colour is free to carry attribution, which is the harder thing to
+    # recover. Each speaker's bars also sit in their own narrow lane so two
+    # events at the same moment do not overdraw each other.
+    lane = {s: i for i, s in enumerate(speakers)}
     for e in events:
         if e["speaker"] not in speakers or not e["points"]:
             continue
-        x = px(e["at"])
+        x = px(e["at"]) + lane[e["speaker"]] * 3
         h = abs(e["points"]) * 7
-        colour = GOOD if e["points"] > 0 else BAD
+        colour = SERIES[lane[e["speaker"]] % len(SERIES)]
         if e["points"] > 0:
             c.rect(x, zero - h, x + 2, zero, colour)
         else:

@@ -127,3 +127,28 @@ def rules_table() -> str:
         "| Fallacy — major | −3 |",
     ]
     return "\n".join(rows)
+
+
+def summary(evts: list[dict], speakers: list[str]) -> list[dict]:
+    """Per speaker: what they earned, what it cost them, and on what.
+
+    The chart shows the shape; this says whose each mark was. Without it a
+    reader can see that a fallacy happened at 0:34 and has no way to tell
+    which of the two people in the room committed it.
+    """
+    rows = []
+    for s in speakers:
+        mine = [e for e in evts if e["speaker"] == s]
+        won = sum(e["points"] for e in mine if e["points"] > 0)
+        lost = sum(e["points"] for e in mine if e["points"] < 0)
+        rows.append({
+            "speaker": s,
+            "won": won,
+            "lost": lost,
+            "net": won + lost,
+            "fallacies": sum(1 for e in mine if e["kind"] == "fallacy"),
+            "goalposts": sum(1 for e in mine if e["kind"] == "goalpost"),
+            "unanswered": sum(1 for e in mine
+                              if e["kind"] == "outcome" and e["points"] > 0),
+        })
+    return sorted(rows, key=lambda r: -r["net"])

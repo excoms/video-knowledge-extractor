@@ -297,6 +297,10 @@ def write_register(reg: dict, path: Path, meta: dict,
                  "won, downward for a fallacy or a shifted goalpost — so a bad "
                  "ten minutes shows as a cluster rather than having to be "
                  "inferred from a slope.\n")
+        L.append("Each speaker's bars are in their own colour, matching their "
+                 "line, so a mark can be attributed without counting along the "
+                 "axis.\n")
+        L += _score_tables(records)
         L.append("This is derived from the extracted records by fixed rules, "
                  "not by judgement, so you can disagree with the weights:\n")
         from .scoring import rules_table
@@ -401,6 +405,41 @@ def write_register(reg: dict, path: Path, meta: dict,
 
     path.write_text("\n".join(L), encoding="utf-8")
     return path
+
+
+def _score_tables(records: list[dict]) -> list[str]:
+    """Who earned what, and every mark that moved the line.
+
+    The chart makes the shape visible; these make it checkable. A reader who
+    disputes a fallacy can find the moment it was scored and argue with it.
+    """
+    from . import scoring
+
+    evts = scoring.events(records)
+    if not evts:
+        return []
+    speakers = list(dict.fromkeys(e["speaker"] for e in evts))
+    out = ["### Where the points came from\n",
+           "| Speaker | Won | Lost | Net | Fallacies | Goalpost shifts | Points unanswered |",
+           "|---|---|---|---|---|---|---|"]
+    for r in scoring.summary(evts, speakers):
+        out.append(f"| **{r['speaker']}** | +{r['won']} | {r['lost']} "
+                   f"| **{r['net']:+d}** | {r['fallacies']} | {r['goalposts']} "
+                   f"| {r['unanswered']} |")
+    out.append("")
+
+    costly = [e for e in evts if e["points"] < 0]
+    if costly:
+        out.append("### Every mark against a speaker\n")
+        out.append("The downward bars on the chart, named. Ordered as they "
+                   "happened.\n")
+        out.append("| At | Speaker | Cost | What it was |")
+        out.append("|---|---|---|---|")
+        for e in costly:
+            out.append(f"| {_clock(e['at'])} | {e['speaker']} | {e['points']} "
+                       f"| {str(e['reason']).replace('|', '/')[:90]} |")
+        out.append("")
+    return out
 
 
 def _write_chart(records: list[dict], report_path: Path) -> str | None:
