@@ -627,6 +627,38 @@ def test_the_chart_is_a_real_png_with_no_dependencies():
     assert not heavy, f"chart.py imports beyond the standard library: {sorted(heavy)}"
 
 
+def test_the_word_version_actually_contains_the_chart():
+    """pandoc resolves image paths against the working directory, not the doc.
+
+    Regression: the report references its chart by bare filename. Without
+    --resource-path, pandoc produced a Word file successfully, exit code
+    zero, with the image silently absent — the worst kind of failure,
+    because nothing looks wrong until someone opens it.
+    """
+    import shutil
+    import tempfile
+    import zipfile
+
+    if not shutil.which("pandoc"):
+        return                      # nothing to assert on a machine without it
+
+    from vke import chart, report, scoring
+
+    tmp = Path(tempfile.mkdtemp())
+    evts = scoring.events([
+        {"speaker": "A", "timestamp": [60, 70],
+         "record": {"outcome": "unanswered", "defensible_ground": "y" * 60}}])
+    chart.momentum(scoring.running(evts, ["A"]), evts, tmp / "debrief-score.png")
+    (tmp / "debrief.md").write_text(
+        "# T\n\n![Score](debrief-score.png)\n", encoding="utf-8")
+
+    out = report.write_docx(tmp / "debrief.md")
+    assert out and out.exists(), "no Word file produced"
+    with zipfile.ZipFile(out) as z:
+        media = [n for n in z.namelist() if "/media/" in n]
+    assert media, "the Word file has no embedded image — --resource-path lost"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

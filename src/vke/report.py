@@ -100,8 +100,13 @@ def write_docx(markdown_path: Path, out_path: Path | None = None) -> Path | None
     out_path = out_path or markdown_path.with_suffix(".docx")
     try:
         subprocess.run(
+            # --resource-path: the report references its chart by bare
+            # filename, and pandoc resolves relative paths against the working
+            # directory, not the document. Without this the Word file is
+            # produced successfully with the image silently missing.
             ["pandoc", str(markdown_path), "-o", str(out_path),
              "--toc", "--toc-depth=2",
+             "--resource-path", str(markdown_path.parent),
              "--metadata", f"title={markdown_path.stem.replace('_', ' ').title()}",
              "-V", "lang=en"],
             check=True, capture_output=True, text=True, timeout=120)
