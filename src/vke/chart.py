@@ -156,7 +156,12 @@ def _clock(seconds: float) -> str:
 
 def momentum(series: dict, events: list[dict], path: Path,
              width: int = 900, height: int = 440) -> Path:
-    """Cumulative score per speaker over the length of the debate.
+    """Cumulative running tally per speaker over the length of the debate.
+
+    Deliberately not called a score: the report carries a scorecard out of 50
+    as well, and two differently-scaled numbers both called "score" read as an
+    arithmetic error. In one run the two happened to coincide exactly at 31,
+    which is how the confusion was found.
 
     Two layers. Behind: one bar per scoring event, up for a point won, down
     for a fallacy or a shifted goalpost — so a bad ten minutes is visible as

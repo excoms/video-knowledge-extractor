@@ -290,19 +290,29 @@ def write_register(reg: dict, path: Path, meta: dict,
 
     chart_rel = _write_chart(records, path)
     if chart_rel:
-        L.append(head("How the score moved"))
-        L.append(f"![Score over time]({chart_rel})\n")
-        L.append("The line is each speaker's running total. The bars behind it "
+        L.append(head("How the debate moved"))
+        L.append("> **This is not the scorecard above, and the two numbers do "
+                 "not compare.** The scorecard grades the performance — five "
+                 "dimensions, each out of ten, judged as a whole. What follows "
+                 "is a running tally of observable events, counted by fixed "
+                 "rules. It has no ceiling: a longer debate with more extracted "
+                 "points produces bigger numbers, so a tally is only meaningful "
+                 "*within* one debate and never between two. Where the two "
+                 "measures disagree about the size of a gap, that disagreement "
+                 "is itself worth reading — the tally counts moments, the "
+                 "scorecard weighs them.\n")
+        L.append(f"![How the debate moved]({chart_rel})\n")
+        L.append("The line is each speaker's running tally. The bars behind it "
                  "are the individual moments that moved it — upward for a point "
                  "won, downward for a fallacy or a shifted goalpost — so a bad "
                  "ten minutes shows as a cluster rather than having to be "
-                 "inferred from a slope.\n")
-        L.append("Each speaker's bars are in their own colour, matching their "
-                 "line, so a mark can be attributed without counting along the "
-                 "axis.\n")
+                 "inferred from a slope. Each speaker's bars are in their own "
+                 "colour, matching their line, so a mark can be attributed "
+                 "without counting along the axis.\n")
         L += _score_tables(records)
-        L.append("This is derived from the extracted records by fixed rules, "
-                 "not by judgement, so you can disagree with the weights:\n")
+        L.append("The tally is derived from the extracted records by these "
+                 "fixed rules, not by judgement, so you can disagree with the "
+                 "weights:\n")
         from .scoring import rules_table
         L.append(rules_table() + "\n")
 
@@ -419,8 +429,8 @@ def _score_tables(records: list[dict]) -> list[str]:
     if not evts:
         return []
     speakers = list(dict.fromkeys(e["speaker"] for e in evts))
-    out = ["### Where the points came from\n",
-           "| Speaker | Won | Lost | Net | Fallacies | Goalpost shifts | Points unanswered |",
+    out = ["### Where the tally came from\n",
+           "| Speaker | Won | Lost | Running tally | Fallacies | Goalpost shifts | Points unanswered |",
            "|---|---|---|---|---|---|---|"]
     for r in scoring.summary(evts, speakers):
         out.append(f"| **{r['speaker']}** | +{r['won']} | {r['lost']} "

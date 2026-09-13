@@ -659,6 +659,35 @@ def test_the_word_version_actually_contains_the_chart():
     assert media, "the Word file has no embedded image — --resource-path lost"
 
 
+def test_the_tally_is_never_presented_as_a_second_score():
+    """Two differently-scaled numbers both called "score" read as a bug.
+
+    The scorecard is out of 50 and judged as a whole; the tally counts
+    events and has no ceiling. In one real run they coincided exactly at 31
+    for the same speaker, and the report was read as having miscalculated.
+    Whenever both appear, the report must say plainly that they are not the
+    same measure.
+    """
+    import tempfile
+
+    from vke import corpus
+
+    records = [{"speaker": "A", "timestamp": [60, 70], "quote_original": "q",
+                "record": {"outcome": "unanswered", "claim": "c",
+                           "defensible_ground": "y" * 60}} for _ in range(4)]
+    reg = {"scorecard": [{"speaker": "A", "total": 31}], "overall": "v"}
+    out = corpus.write_register(reg, Path(tempfile.mkdtemp()) / "debrief.md",
+                                {"source_name": "T"}, records)
+    body = out.read_text("utf-8")
+
+    assert "not the scorecard above" in body, \
+        "the report no longer distinguishes the tally from the scorecard"
+    assert "never between two" in body, \
+        "the report no longer says a tally cannot be compared across debates"
+    assert "## 2. How the debate moved" in body, \
+        "the tally section is calling itself a score again"
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
