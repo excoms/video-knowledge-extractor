@@ -44,12 +44,21 @@ Produce a debrief. Return JSON only, with exactly these keys:
                              the real support it has, and do not inflate>",
              "weakest_flank": "<where a well-informed opponent attacks first —
                                 the specific weak joint, not a disclaimer>",
-             "better_framing": "<the same argument put at its strongest>",
+             "as_put": "<roughly how the speaker ACTUALLY put it — a short
+                         paraphrase in their own register, close enough that
+                         they would recognise it. Not a summary of the claim:
+                         the wording, including what made it weak.>",
+             "better_framing": "<the same argument at its strongest, written as
+                                 words the speaker could actually say out loud.
+                                 A form of words, not a description of one.>",
              "counter_response": "<the best reply the OTHER side can make to that
                                    improved version — argued as well as the framing
                                    itself, not a token objection. End by naming the
                                    ground the responder should move the exchange to,
                                    where their position is genuinely stronger.>",
+             "counter_wording": "<that reply as words the responder could say out
+                                  loud — the sentences themselves, not a
+                                  description of what they would argue.>",
              "how_it_fared": "unanswered" | "answered" | "conceded" | "contested",
              "note": "<what happened to it across the discussion>"}],
 
@@ -87,6 +96,12 @@ Produce a debrief. Return JSON only, with exactly these keys:
 Rules on scoring, which is the part most often done badly:
 - Judge the ARGUING, not the conclusion. A view you find mistaken, defended
   well, outscores one you share, defended badly.
+- as_put, better_framing and counter_wording are QUOTED SPEECH, not commentary.
+  Write what someone would say, in the first person, without "the speaker should
+  argue that". A reader must be able to lift better_framing and counter_wording
+  straight into an exchange and use them. as_put is the before to
+  better_framing's after, so the pair has to be comparable: same claim, same
+  speaker, one badly put and one well put.
 - counter_response must be a real reply, of the same quality as the framing it
   answers. Steelman both sides: if the improved argument is genuinely hard to
   answer, say where its weight actually lies and what the responder's best
@@ -345,12 +360,26 @@ def write_register(reg: dict, path: Path, meta: dict,
             if t.get("core_claim"):
                 L.append(f"**The claim** — {t['core_claim']}\n")
             for label, key in (("What is genuinely defensible", "defensible"),
-                               ("Weakest flank", "weakest_flank"),
-                               ("How it should have been put", "better_framing"),
-                               ("The reply that comes back", "counter_response"),
-                               ("How it fared", "note")):
+                               ("Weakest flank", "weakest_flank")):
                 if t.get(key):
                     L.append(f"**{label}** — {t[key]}\n")
+
+            # Before and after, adjacent and both as speech. A reader comparing
+            # the two can see what changed; a description of an improvement
+            # cannot be used, only admired.
+            if t.get("as_put") or t.get("better_framing"):
+                L.append("**How it should have been put**\n")
+                if t.get("as_put"):
+                    L.append(f"*As put —* {t['as_put']}\n")
+                if t.get("better_framing"):
+                    L.append(f"*Better —* {t['better_framing']}\n")
+
+            if t.get("counter_response"):
+                L.append(f"**The reply that comes back** — {t['counter_response']}\n")
+            if t.get("counter_wording"):
+                L.append(f"*In their words —* {t['counter_wording']}\n")
+            if t.get("note"):
+                L.append(f"**How it fared** — {t['note']}\n")
 
     if reg.get("fallacies"):
         L.append(head("Fallacies"))

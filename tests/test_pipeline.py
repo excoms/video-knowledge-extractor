@@ -393,11 +393,52 @@ def test_argument_defaults_ask_for_the_reply_that_comes_back():
         "debate profile": (src / "profiles" / "debate.txt").read_text("utf-8"),
     }
     for where, body in surfaces.items():
-        low = body.lower()
+        low = " ".join(body.lower().split())
         assert "reply" in low or "counter" in low, \
             f"{where} no longer asks for the reply that comes back"
         assert "stronger" in low, \
             f"{where} no longer asks where the responder is stronger"
+
+    # The improvement has to show what it displaced, and all of it has to be
+    # usable speech rather than commentary about speech.
+    for where in ("preset request", "preset output shape", "page",
+                  "corpus schema and rules", "debate profile"):
+        low = " ".join(surfaces[where].lower().split())
+        assert "as put" in low or "actually" in low or "as_put" in low, \
+            f"{where} no longer asks how it was actually phrased"
+        assert "out loud" in low or "speech" in low or "could say" in low \
+            or "actually speak" in low, \
+            f"{where} no longer requires the wording to be usable speech"
+
+
+def test_the_report_shows_the_phrasing_before_and_after():
+    """An improvement with nothing beside it cannot be judged.
+
+    The reader needs the speaker's own wording next to the better version to
+    see which weakness was removed, and needs both as speech so they can be
+    used rather than admired.
+    """
+    import tempfile
+
+    from vke import corpus
+
+    reg = {"themes": [{"theme": "T", "raised_by": "A", "times_made": 1,
+                       "core_claim": "c", "defensible": "d",
+                       "weakest_flank": "w",
+                       "as_put": "Everyone knows this is obvious.",
+                       "better_framing": "Here is the evidence, and here is why.",
+                       "counter_response": "The evidence does not reach the claim.",
+                       "counter_wording": "Your source says X, and you need Y.",
+                       "note": "contested"}]}
+    out = corpus.write_register(reg, Path(tempfile.mkdtemp()) / "debrief.md",
+                                {"source_name": "T"})
+    body = out.read_text("utf-8")
+    for must in ("*As put —* Everyone knows this is obvious.",
+                 "*Better —* Here is the evidence, and here is why.",
+                 "*In their words —* Your source says X, and you need Y."):
+        assert must in body, f"missing from the report: {must}"
+    assert body.index("*As put") < body.index("*Better"), \
+        "the original must come before the improvement"
 
 
 def test_no_function_shadows_a_module_it_imports():

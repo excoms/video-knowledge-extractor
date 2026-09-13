@@ -35,3 +35,15 @@ to, where their own position is genuinely stronger.
 This holds on a single-speaker video as much as in a two-sided debate. If no
 opponent is present, supply the reply a well-informed one would give, and say
 that is what you are doing.
+
+When you show how something should have been put, show what it displaced:
+give the wording roughly as the speaker actually used it, then the improved
+version beside it. An improvement with nothing to compare it against cannot
+be judged, and the reader cannot see which specific weakness was removed.
+
+Write all three — the original phrasing, the improved phrasing, and the
+reply — as speech. First person, the words themselves, not a description of
+what someone would argue. A reader should be able to lift them straight into
+an exchange. "He should have appealed to the textual context" is commentary;
+"The verse you are citing has a clause after it — read it and tell me it
+still says what you claim" is usable.
