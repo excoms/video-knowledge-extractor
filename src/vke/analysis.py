@@ -18,6 +18,17 @@ SCHEMA_VERSION = "1.0"
 CHUNK_CHARS = 12000
 CHUNK_OVERLAP = 800
 
+
+class UnreadableReplies(RuntimeError):
+    """No part of a transcript produced parseable output.
+
+    Kept distinct from "the model found nothing". The records are absent
+    because the replies were unusable, which is a fault to act on, not a
+    result to report. Collapsing the two is what let a corrupted reply
+    read as an empty transcript all the way to a successful exit.
+    """
+
+
 PLANNER_SYSTEM = """You design compact JSON schemas for information extraction.
 
 Given what a user wants from a video, decide the fields each extracted record
@@ -264,6 +275,7 @@ def analyse(provider, transcript, plan: Plan, request: str,
     """Extract records from one transcript. Returns envelope-wrapped records."""
     chunks = chunk(transcript.text)
     records: list[dict] = []
+    unreadable: list[str] = []
 
     for n, part in enumerate(chunks, 1):
         system = EXTRACTOR_SYSTEM
@@ -292,7 +304,15 @@ def analyse(provider, transcript, plan: Plan, request: str,
         raw = provider.complete(system, user, max_tokens=8000)
         try:
             items = extract_json(raw)
-        except Exception:
+        except Exception as e:
+            # Say which part failed and what came back. The reply is the
+            # only evidence of why, and discarding it unseen is what made
+            # this fault invisible for a whole run.
+            head = " ".join(raw.split())[:160] or "(empty reply)"
+            unreadable.append(head)
+            print(f"        part {n}/{len(chunks)}: reply would not parse "
+                  f"({e.__class__.__name__}); it began: {head[:80]}",
+                  flush=True)
             continue
         if isinstance(items, dict):
             items = items.get("records") or items.get(plan.record_name + "s") or [items]
@@ -323,4 +343,13 @@ def analyse(provider, transcript, plan: Plan, request: str,
                 "record": item.get("fields") or {},
             })
 
+    if unreadable and not records:
+        raise UnreadableReplies(
+            f"No part of this transcript produced a parseable reply "
+            f"({len(unreadable)} of {len(chunks)} part(s) failed), so "
+            f"nothing was extracted. The first reply began:\n\n"
+            f"    {unreadable[0]}\n\n"
+            f"That is a provider or configuration fault, not a "
+            f"transcript with nothing in it."
+        )
     return _dedupe(records)

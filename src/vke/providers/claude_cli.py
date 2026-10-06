@@ -61,6 +61,14 @@ class ClaudeCliProvider:
         if not on_stdin:
             cmd.append(prompt)
         cmd += ["--output-format", output_format]
+        # Whatever Claude Code settings the host machine carries apply
+        # to `claude -p` too, and a user-level hook can add its own text
+        # to the reply. Observed both ways round: text after the JSON
+        # left extract_json returning a different object, and text
+        # before it used up the output budget so no JSON arrived at
+        # all. A machine-readable call opts out of every settings
+        # source rather than hoping to out-parse whatever a host adds.
+        cmd += ["--setting-sources="]
         if self.model:
             cmd += ["--model", self.model]
         return subprocess.run(cmd, input=prompt if on_stdin else None,

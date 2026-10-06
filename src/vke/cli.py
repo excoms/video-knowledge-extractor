@@ -352,6 +352,7 @@ def cmd_run(a) -> int:
                 print("  Speakers: " + ", ".join(r["name"] for r in roster))
 
     records: list[dict] = []
+    failed: list[str] = []
     for i, ref in enumerate(ready, 1):
         text = store.get_transcript(ref.video_id)
         if not text:
@@ -368,6 +369,8 @@ def cmd_run(a) -> int:
             records.extend(got)
             print(f"        {len(got)} {plan.record_name}(s)", flush=True)
         except Exception as e:
+            failed.append(f"{t.title[:60]} — "
+                          f"{str(e).splitlines()[0][:200]}")
             print(f"        analysis failed: {str(e)[:90]}", flush=True)
 
     meta = {"title": f"{plan.record_name.title()} analysis",
@@ -386,6 +389,14 @@ def cmd_run(a) -> int:
     report.write_json(records, outdir / "analysis.json", meta)
     print(f"\n  {len(records)} records -> {outdir / 'analysis.json'}")
 
+    # Same empty analysis.json, two different faults. A run that read the
+    # transcripts and found nothing is a result; a run that extracted
+    # nothing because the replies were unusable is a failure, and must not
+    # leave with the exit code of a success.
+    if not records and failed:
+        _nothing_extracted(outdir, failed)
+        return 1
+
     if not a.no_corpus and len(records) >= corpus_mod.MIN_RECORDS:
         print("  Grouping, scoring and profiling ...", flush=True)
         meta["source_name"] = ready[0].title if len(ready) == 1 else ", ".join(a.urls)
@@ -402,6 +413,24 @@ def cmd_run(a) -> int:
                 print(f"  Word version -> {doc}")
 
     return 0
+
+
+def _nothing_extracted(outdir, failures: list[str]) -> None:
+    """Say, loudly and on disk, that there are no records and why.
+
+    The transcripts are the expensive part and they survive. An empty
+    analysis.json on its own cannot tell the difference between a source
+    with nothing in it and a provider that answered unusably; this file
+    is where that difference is written down.
+    """
+    note = ("No records were extracted.\n\n"
+            + "\n".join(f"  - {f}" for f in failures)
+            + "\n\nThe transcripts are intact. A reply that will not "
+              "parse is not a transcript with nothing in it, so this is "
+              "a provider or configuration fault rather than a result.\n"
+              "Check `vke providers`, or try --provider anthropic.\n")
+    (outdir / "NOTHING-EXTRACTED.txt").write_text(note, encoding="utf-8")
+    print("\n  " + note.replace("\n", "\n  "))
 
 
 def _strand(outdir, err, n_records: int) -> None:
